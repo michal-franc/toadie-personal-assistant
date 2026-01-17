@@ -3,13 +3,17 @@
 Simple HTTP server that receives audio, transcribes via Deepgram, and runs Claude.
 
 Usage:
-    ./server.py
+    ./server.py <folder>
+
+Arguments:
+    folder - Directory where Claude Code will operate (required)
 
 Endpoints:
     POST /transcribe - Send audio data in body, returns transcript and executes Claude
     GET /health - Health check
 """
 
+import argparse
 import os
 import sys
 import socket
@@ -37,6 +41,9 @@ client = DeepgramClient()
 import time
 last_claude_launch = 0
 LAUNCH_COOLDOWN = 5  # seconds
+
+# Working directory for Claude (set via CLI argument)
+claude_workdir = None
 
 
 def transcribe_audio(audio_data: bytes) -> str:
@@ -68,7 +75,9 @@ def run_claude(text: str):
         print(f"[GUARD] Skipping Claude launch - cooldown active ({LAUNCH_COOLDOWN}s)")
         return False
     last_claude_launch = now
-    subprocess.Popen(['alacritty', '-e', 'claude', text])
+    subprocess.Popen(
+        ['alacritty', '--working-directory', claude_workdir, '-e', 'claude', text]
+    )
     return True
 
 
@@ -157,8 +166,28 @@ class DictationHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    global claude_workdir
+
+    parser = argparse.ArgumentParser(
+        description="HTTP server that transcribes audio and launches Claude Code"
+    )
+    parser.add_argument(
+        "folder",
+        help="Directory where Claude Code will operate"
+    )
+    args = parser.parse_args()
+
+    # Validate and resolve the folder path
+    folder = os.path.abspath(os.path.expanduser(args.folder))
+    if not os.path.isdir(folder):
+        print(f"Error: '{folder}' is not a valid directory", file=sys.stderr)
+        sys.exit(1)
+
+    claude_workdir = folder
+
     server = HTTPServer(('0.0.0.0', PORT), DictationHandler)
     print(f"Dictation receiver listening on port {PORT}")
+    print(f"Claude working directory: {claude_workdir}")
     print(f"POST audio to http://localhost:{PORT}/transcribe")
 
     try:
