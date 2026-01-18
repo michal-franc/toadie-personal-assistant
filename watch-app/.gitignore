@@ -10,12 +10,23 @@ local.properties
 
 # OS
 .DS_Store
+Thumbs.db
 
-# APKs
+# APKs (keep for releases if needed)
 *.apk
 *.ap_
+*.aab
 
 # Generated
 captures/
 .externalNativeBuild/
 .cxx/
+*.hprof
+
+# Kotlin
+*.kotlin_module
+
+# Signing
+*.jks
+*.keystore
+signing.properties

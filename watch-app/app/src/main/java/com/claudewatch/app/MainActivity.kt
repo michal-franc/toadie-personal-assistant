@@ -13,9 +13,9 @@ import android.widget.Button
 import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
+import android.app.Activity
 import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
 import kotlinx.coroutines.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -23,10 +23,11 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.IOException
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
 
     companion object {
         private const val TAG = "ClaudeWatch"
+        private const val PERMISSION_REQUEST_CODE = 1001
     }
 
     private lateinit var recordButton: Button
@@ -45,16 +46,6 @@ class MainActivity : AppCompatActivity() {
         .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            toggleRecording()
-        } else {
-            showStatus("Microphone permission denied", isError = true)
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -72,7 +63,32 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
-        showStatus("Tap to record")
+        // Auto-start recording on launch
+        autoStartRecording()
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        // Second button press - toggle recording
+        if (isRecording) {
+            stopRecordingAndSend()
+        } else {
+            autoStartRecording()
+        }
+    }
+
+    private fun autoStartRecording() {
+        if (checkPermission()) {
+            if (!isRecording) {
+                startRecording()
+            }
+        } else {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                PERMISSION_REQUEST_CODE
+            )
+        }
     }
 
     override fun onDestroy() {
@@ -86,7 +102,26 @@ class MainActivity : AppCompatActivity() {
         if (checkPermission()) {
             toggleRecording()
         } else {
-            requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                PERMISSION_REQUEST_CODE
+            )
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startRecording()
+            } else {
+                showStatus("Microphone permission denied", isError = true)
+            }
         }
     }
 

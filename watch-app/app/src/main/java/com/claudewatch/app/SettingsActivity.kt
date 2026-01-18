@@ -6,9 +6,9 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
+import android.app.Activity
 
-class SettingsActivity : AppCompatActivity() {
+class SettingsActivity : Activity() {
 
     companion object {
         private const val PREFS_NAME = "ClaudeWatchPrefs"
