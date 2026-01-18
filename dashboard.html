@@ -174,6 +174,9 @@
     .workflow-step.error:not(:last-child)::after {
       background: #f87171;
     }
+    .workflow-step.in_progress:not(:last-child)::after {
+      background: #60a5fa;
+    }
     .step-icon {
       width: 24px;
       height: 24px;
@@ -203,6 +206,15 @@
       background: #333;
       color: #666;
     }
+    .workflow-step.in_progress .step-icon {
+      background: #1e3a5f;
+      color: #60a5fa;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
     .step-label {
       font-size: 0.7rem;
       color: #888;
@@ -214,6 +226,9 @@
     }
     .workflow-step.error .step-label {
       color: #f87171;
+    }
+    .workflow-step.in_progress .step-label {
+      color: #60a5fa;
     }
 
     /* Transcript preview */
@@ -331,6 +346,10 @@
       background: #991b1b;
       color: #f87171;
     }
+    .status-badge.in_progress {
+      background: #1e3a5f;
+      color: #60a5fa;
+    }
 
     /* Settings form */
     .form-group {
@@ -413,7 +432,7 @@
     <header>
       <div class="header-left">
         <h1>Claude Watch</h1>
-        <span class="config-badge" v-if="config.model">{{ config.model }} / {{ config.language }}</span>
+        <span class="config-badge" v-if="config.model">{{ config.model }} / {{ config.language }} / {{ responseConfig.mode }}</span>
       </div>
       <div style="display: flex; align-items: center; gap: 12px;">
         <div class="workdir" v-if="workdir">{{ workdir }}</div>
@@ -469,6 +488,7 @@
               <span v-if="step.status === 'completed'">&#10003;</span>
               <span v-else-if="step.status === 'error'">&#10005;</span>
               <span v-else-if="step.status === 'skipped'">&#8211;</span>
+              <span v-else-if="step.status === 'in_progress'">&#8987;</span>
               <span v-else>{{ index + 1 }}</span>
             </div>
             <div class="step-label">{{ step.label }}</div>
@@ -576,6 +596,78 @@
           </div>
         </template>
 
+        <!-- Waiting for response step -->
+        <template v-if="modal.step?.name === 'waiting_response'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Status</span>
+            <span class="modal-value">{{ modal.step.details }}</span>
+          </div>
+          <div style="font-size: 0.8rem; color: #888; margin-top: 12px;">
+            Monitoring tmux session for Claude's response...
+          </div>
+        </template>
+
+        <!-- Response captured step -->
+        <template v-if="modal.step?.name === 'response_captured'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Response</span>
+          </div>
+          <div class="modal-transcript">
+            {{ modal.step.details }}
+          </div>
+        </template>
+
+        <!-- TTS generating step -->
+        <template v-if="modal.step?.name === 'tts_generating'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Service</span>
+            <span class="modal-value">Deepgram TTS</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Status</span>
+            <span class="modal-value">{{ modal.step.details }}</span>
+          </div>
+        </template>
+
+        <!-- Response ready step -->
+        <template v-if="modal.step?.name === 'response_ready'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Type</span>
+            <span class="modal-value">{{ modal.step.details }}</span>
+          </div>
+          <div style="font-size: 0.8rem; color: #4ade80; margin-top: 12px;">
+            ✓ Response ready - watch can poll /api/response/{{ modal.item?.request_id }}
+          </div>
+        </template>
+
+        <!-- Response disabled step -->
+        <template v-if="modal.step?.name === 'response_disabled'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Reason</span>
+            <span class="modal-value">{{ modal.step.details }}</span>
+          </div>
+        </template>
+
         <!-- Error step -->
         <template v-if="modal.step?.name === 'error' || modal.step?.error">
           <div class="modal-row">
@@ -632,6 +724,22 @@
           </div>
         </div>
 
+        <div style="border-top: 1px solid #333; margin: 20px 0; padding-top: 16px;">
+          <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 12px; color: #ccc;">Watch Response</div>
+        </div>
+
+        <div class="form-group">
+          <label>Response Mode</label>
+          <select v-model="settingsModal.form.response_mode">
+            <option v-for="m in configOptions.response_modes" :key="m" :value="m">{{ m }}</option>
+          </select>
+          <div style="font-size: 0.75rem; color: #666; margin-top: 4px;">
+            <span v-if="settingsModal.form.response_mode === 'text'">Send text notification to watch</span>
+            <span v-else-if="settingsModal.form.response_mode === 'audio'">Play audio response on watch (TTS)</span>
+            <span v-else-if="settingsModal.form.response_mode === 'disabled'">Don't send responses to watch</span>
+          </div>
+        </div>
+
         <div class="form-actions">
           <button class="btn btn-primary" @click="saveSettings">Save</button>
           <button class="btn btn-secondary" @click="closeSettings">Cancel</button>
@@ -650,10 +758,11 @@
         const autoRefresh = ref(true)
         const modal = ref({ visible: false, item: null, step: null })
         const config = ref({ model: '', language: '', smart_format: true, punctuate: true })
-        const configOptions = ref({ models: [], languages: [] })
+        const responseConfig = ref({ mode: 'text' })
+        const configOptions = ref({ models: [], languages: [], response_modes: [] })
         const settingsModal = ref({
           visible: false,
-          form: { model: '', language: '', smart_format: true, punctuate: true }
+          form: { model: '', language: '', smart_format: true, punctuate: true, response_mode: 'text' }
         })
         let intervalId = null
 
@@ -679,6 +788,7 @@
             const res = await fetch('/api/config')
             const data = await res.json()
             config.value = data.config
+            responseConfig.value = data.response_config || { mode: 'text' }
             configOptions.value = data.options
           } catch (e) {
             console.error('Failed to fetch config:', e)
@@ -695,6 +805,7 @@
             const data = await res.json()
             if (data.status === 'ok') {
               config.value = data.config
+              responseConfig.value = data.response_config || responseConfig.value
               closeSettings()
             } else {
               alert('Error saving settings: ' + (data.errors?.join(', ') || data.message))
@@ -731,7 +842,7 @@
         }
 
         const openSettings = () => {
-          settingsModal.value.form = { ...config.value }
+          settingsModal.value.form = { ...config.value, response_mode: responseConfig.value.mode }
           settingsModal.value.visible = true
         }
 
@@ -766,6 +877,7 @@
           autoRefresh,
           modal,
           config,
+          responseConfig,
           configOptions,
           settingsModal,
           stats,

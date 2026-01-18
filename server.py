@@ -69,15 +69,72 @@ transcription_config = {
 
 # Response configuration
 response_config = {
-    'mode': 'text',  # 'text' or 'audio'
+    'mode': 'disabled',  # 'text', 'audio', or 'disabled'
 }
 
 # Available options for configuration
 CONFIG_OPTIONS = {
     'models': ['nova-2', 'nova', 'enhanced', 'base'],
     'languages': ['en-US', 'pl'],
-    'response_modes': ['text', 'audio']
+    'response_modes': ['text', 'audio', 'disabled']
 }
+
+# Directory for temporary audio files
+AUDIO_CACHE_DIR = "/tmp/claude-watch-audio"
+os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
+
+
+def text_to_speech(text: str, request_id: str) -> str:
+    """Convert text to speech using Deepgram TTS, returns file path"""
+    log_file = "/tmp/claude-watch-tts.log"
+    try:
+        with open(log_file, "a") as f:
+            f.write(f"\n=== TTS Request {request_id} ===\n")
+            f.write(f"Text: {text[:100]}...\n")
+            # Debug: log available methods
+            f.write(f"client.speak attrs: {[a for a in dir(client.speak) if not a.startswith('_')]}\n")
+
+        audio_path = os.path.join(AUDIO_CACHE_DIR, f"{request_id}.mp3")
+
+        # Truncate text if too long (Deepgram TTS has limits)
+        MAX_TTS_CHARS = 1500
+        if len(text) > MAX_TTS_CHARS:
+            text = text[:MAX_TTS_CHARS] + "..."
+            with open(log_file, "a") as f:
+                f.write(f"Truncated to {MAX_TTS_CHARS} chars\n")
+
+        # Use direct HTTP request to Deepgram TTS API
+        import urllib.request
+        import urllib.error
+
+        url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
+        headers = {
+            "Authorization": f"Token {api_key}",
+            "Content-Type": "application/json",
+        }
+        data = json.dumps({"text": text}).encode('utf-8')
+
+        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+        with urllib.request.urlopen(req, timeout=30) as response:
+            audio_data = response.read()
+
+        with open(audio_path, 'wb') as f:
+            f.write(audio_data)
+
+        with open(log_file, "a") as f:
+            f.write(f"Success: {audio_path} ({len(audio_data)} bytes)\n")
+
+        print(f"[TTS] Generated audio: {audio_path}")
+        return audio_path
+    except Exception as e:
+        import traceback
+        error_msg = traceback.format_exc()
+        with open(log_file, "a") as f:
+            f.write(f"Error: {e}\n")
+            f.write(f"Traceback:\n{error_msg}\n")
+        print(f"[TTS] Error generating speech: {e}")
+        traceback.print_exc()
+        return None
 
 
 def transcribe_audio(audio_data: bytes) -> str:
@@ -179,19 +236,30 @@ def capture_tmux_output() -> str:
         return ""
 
 
-def monitor_claude_response(request_id: str, initial_output: str):
+def monitor_claude_response(request_id: str, initial_output: str, prompt_text: str = ""):
     """Background thread to monitor Claude's response"""
-    print(f"[MONITOR] Starting monitor for request {request_id}")
+    print(f"[MONITOR] Starting monitor for request {request_id}, prompt: {prompt_text[:50]}...")
+
+    # Add waiting step to history
+    add_response_step(request_id, {
+        'name': 'waiting_response',
+        'label': 'Waiting for Claude',
+        'status': 'in_progress',
+        'timestamp': datetime.now().isoformat(),
+        'details': 'Monitoring Claude output...'
+    })
 
     # Wait a bit for Claude to start processing
-    time.sleep(2)
+    time.sleep(1)
 
     last_output = initial_output
     stable_count = 0
-    max_checks = 24  # 24 * 5s = 120 seconds max
+    max_checks = 40  # More checks with variable intervals
 
     for i in range(max_checks):
-        time.sleep(5)
+        # Poll faster at the start (every 2s), then slow down (every 5s)
+        interval = 2 if i < 10 else 5
+        time.sleep(interval)
 
         current_output = capture_tmux_output()
 
@@ -207,35 +275,156 @@ def monitor_claude_response(request_id: str, initial_output: str):
             last_output = current_output
 
     # Extract the response (everything after the prompt)
-    response = extract_claude_response(initial_output, current_output)
+    response = extract_claude_response(initial_output, current_output, prompt_text)
+    response_captured_at = datetime.now()
+
+    # Update waiting step to completed
+    update_response_step(request_id, 'waiting_response', {
+        'status': 'completed',
+        'details': f'Response captured ({len(response)} chars)'
+    })
+
+    # Check if responses are disabled
+    if response_config['mode'] == 'disabled':
+        claude_responses[request_id] = {
+            'status': 'disabled',
+            'timestamp': datetime.now().isoformat()
+        }
+        add_response_step(request_id, {
+            'name': 'response_disabled',
+            'label': 'Response',
+            'status': 'skipped',
+            'timestamp': datetime.now().isoformat(),
+            'details': 'Responses disabled in settings'
+        })
+        print(f"[MONITOR] Responses disabled, not storing for {request_id}")
+        return
+
+    # Add response captured step
+    add_response_step(request_id, {
+        'name': 'response_captured',
+        'label': 'Response Captured',
+        'status': 'completed',
+        'timestamp': response_captured_at.isoformat(),
+        'details': response[:200] + ('...' if len(response) > 200 else '')
+    })
+
+    # Generate TTS if audio mode
+    audio_path = None
+    if response_config['mode'] == 'audio' and response:
+        add_response_step(request_id, {
+            'name': 'tts_generating',
+            'label': 'Generating Audio',
+            'status': 'in_progress',
+            'timestamp': datetime.now().isoformat(),
+            'details': 'Sending to Deepgram TTS...'
+        })
+
+        audio_path = text_to_speech(response, request_id)
+
+        update_response_step(request_id, 'tts_generating', {
+            'status': 'completed' if audio_path else 'error',
+            'details': 'Audio generated' if audio_path else 'TTS failed'
+        })
+
+    # Add final ready step
+    add_response_step(request_id, {
+        'name': 'response_ready',
+        'label': 'Ready for Watch',
+        'status': 'completed',
+        'timestamp': datetime.now().isoformat(),
+        'details': f'Type: {response_config["mode"]}'
+    })
 
     claude_responses[request_id] = {
         'status': 'completed',
         'response': response,
+        'audio_path': audio_path,
         'timestamp': datetime.now().isoformat()
     }
     print(f"[MONITOR] Response captured for {request_id}: {response[:100]}...")
 
 
-def extract_claude_response(before: str, after: str) -> str:
-    """Extract Claude's response by comparing before/after output"""
-    # Simple approach: get the new content
+def add_response_step(request_id: str, step: dict):
+    """Add a step to the request history for response tracking"""
+    for entry in request_history:
+        if entry.get('request_id') == request_id:
+            if 'steps' not in entry:
+                entry['steps'] = []
+            entry['steps'].append(step)
+            break
+
+
+def update_response_step(request_id: str, step_name: str, updates: dict):
+    """Update an existing step in the request history"""
+    for entry in request_history:
+        if entry.get('request_id') == request_id:
+            for step in entry.get('steps', []):
+                if step.get('name') == step_name:
+                    step.update(updates)
+                    break
+            break
+
+
+def extract_claude_response(before: str, after: str, prompt_text: str = "") -> str:
+    """Extract Claude's response by finding text after the user's prompt"""
+    import re
+
     if not after:
         return "No response captured"
 
-    # Find new content
-    before_lines = before.strip().split('\n') if before else []
-    after_lines = after.strip().split('\n')
+    # Remove ANSI escape codes
+    after = re.sub(r'\x1b\[[0-9;]*m', '', after)
 
-    # Get lines that are new
-    new_lines = []
-    for i, line in enumerate(after_lines):
-        if i >= len(before_lines) or line != before_lines[i]:
-            new_lines.append(line)
+    # Strategy: Find the user's prompt in the output, then get Claude's response after it
+    # The format is: "❯ user message" followed by "● claude response"
 
-    response = '\n'.join(new_lines).strip()
+    if prompt_text:
+        # Find the prompt in the output (might be truncated or slightly different)
+        # Look for first few words of the prompt
+        prompt_words = prompt_text.split()[:5]  # First 5 words
+        search_text = ' '.join(prompt_words)
 
-    # Clean up common artifacts
+        # Find where our prompt appears
+        prompt_pos = after.find(search_text)
+        if prompt_pos != -1:
+            # Get everything after the prompt
+            after_prompt = after[prompt_pos + len(search_text):]
+
+            # Look for the ● marker which indicates Claude's response
+            if '●' in after_prompt:
+                response = after_prompt.split('●', 1)[1].strip()
+                # Stop at the next prompt (❯)
+                if '❯' in response:
+                    response = response.split('❯')[0].strip()
+            else:
+                # No ● found, try to get text after the prompt line
+                response = after_prompt.strip()
+                if '❯' in response:
+                    response = response.split('❯')[0].strip()
+        else:
+            # Prompt not found, fall back to old method
+            response = after
+    else:
+        response = after
+
+    # If still have ●, extract after it
+    if '●' in response:
+        response = response.split('●', 1)[1].strip()
+
+    # Stop at next prompt
+    if '❯' in response:
+        response = response.split('❯')[0].strip()
+
+    # Remove lines that are just box-drawing characters (─, ━, ═, etc.)
+    lines = response.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not re.match(r'^[─━═\-_\s]+$', stripped):
+            cleaned_lines.append(line)
+    response = '\n'.join(cleaned_lines).strip()
+
     if not response:
         return "Response captured but empty"
 
@@ -258,7 +447,7 @@ def run_claude(text: str, request_id: str = None):
             # Start monitoring for response
             if request_id:
                 claude_responses[request_id] = {'status': 'pending', 'timestamp': datetime.now().isoformat()}
-                thread = threading.Thread(target=monitor_claude_response, args=(request_id, initial_output))
+                thread = threading.Thread(target=monitor_claude_response, args=(request_id, initial_output, text))
                 thread.daemon = True
                 thread.start()
             return True
@@ -275,7 +464,7 @@ def run_claude(text: str, request_id: str = None):
     # Start monitoring for response
     if success and request_id:
         claude_responses[request_id] = {'status': 'pending', 'timestamp': datetime.now().isoformat()}
-        thread = threading.Thread(target=monitor_claude_response, args=(request_id, ""))
+        thread = threading.Thread(target=monitor_claude_response, args=(request_id, "", text))
         thread.daemon = True
         thread.start()
 
@@ -317,6 +506,11 @@ class DictationHandler(BaseHTTPRequestHandler):
         # Handle config update
         if self.path == '/api/config':
             self.handle_config_update(content_length)
+            return
+
+        # Handle response acknowledgment from watch
+        if self.path.startswith('/api/response/') and self.path.endswith('/ack'):
+            self.handle_response_ack()
             return
 
         print(f"=== Incoming Request ===")
@@ -416,6 +610,8 @@ class DictationHandler(BaseHTTPRequestHandler):
                 'status': 'ok',
                 'request_id': request_id,
                 'transcript': transcript or '',
+                'response_enabled': response_config['mode'] != 'disabled',
+                'response_mode': response_config['mode'],
                 'message': 'No speech detected' if not transcript else None
             }).encode())
 
@@ -461,6 +657,8 @@ class DictationHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'status': 'ok'}).encode())
         elif self.path.startswith('/api/response/'):
             self.handle_response_check()
+        elif self.path.startswith('/api/audio/'):
+            self.handle_audio_file()
         elif self.path == '/api/history':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -477,6 +675,7 @@ class DictationHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({
                 'config': transcription_config,
+                'response_config': response_config,
                 'options': CONFIG_OPTIONS
             }).encode())
         elif self.path == '/' or self.path == '/dashboard':
@@ -513,6 +712,12 @@ class DictationHandler(BaseHTTPRequestHandler):
             if 'punctuate' in new_config:
                 transcription_config['punctuate'] = bool(new_config['punctuate'])
 
+            if 'response_mode' in new_config:
+                if new_config['response_mode'] in CONFIG_OPTIONS['response_modes']:
+                    response_config['mode'] = new_config['response_mode']
+                else:
+                    errors.append(f"Invalid response_mode: {new_config['response_mode']}")
+
             if errors:
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
@@ -523,14 +728,15 @@ class DictationHandler(BaseHTTPRequestHandler):
                     'errors': errors
                 }).encode())
             else:
-                print(f"[CONFIG] Updated: {transcription_config}")
+                print(f"[CONFIG] Updated: {transcription_config}, response: {response_config}")
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 self.wfile.write(json.dumps({
                     'status': 'ok',
-                    'config': transcription_config
+                    'config': transcription_config,
+                    'response_config': response_config
                 }).encode())
 
         except json.JSONDecodeError as e:
@@ -546,6 +752,18 @@ class DictationHandler(BaseHTTPRequestHandler):
     def handle_response_check(self):
         """Handle GET /api/response/<id> to check Claude's response"""
         request_id = self.path.split('/')[-1]
+
+        # Check if responses are disabled
+        if response_config['mode'] == 'disabled':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'status': 'disabled',
+                'message': 'Responses are disabled on server'
+            }).encode())
+            return
 
         if request_id not in claude_responses:
             self.send_response(404)
@@ -570,18 +788,26 @@ class DictationHandler(BaseHTTPRequestHandler):
                 'status': 'pending',
                 'message': 'Claude is still processing'
             }).encode())
+        elif response_data['status'] == 'disabled':
+            self.wfile.write(json.dumps({
+                'status': 'disabled',
+                'message': 'Responses were disabled'
+            }).encode())
         else:
             # Response is ready
             response_text = response_data.get('response', '')
+            audio_path = response_data.get('audio_path')
+
+            # Note: actual delivery confirmation comes via POST /api/response/<id>/ack
 
             # Check response mode
-            if response_config['mode'] == 'audio':
-                # TODO: Generate TTS audio
+            if audio_path and os.path.exists(audio_path):
+                # Audio response available
                 self.wfile.write(json.dumps({
                     'status': 'completed',
                     'type': 'audio',
                     'response': response_text,
-                    'audio_url': None  # Would be URL to audio file
+                    'audio_url': f'/api/audio/{request_id}'
                 }).encode())
             else:
                 self.wfile.write(json.dumps({
@@ -590,8 +816,64 @@ class DictationHandler(BaseHTTPRequestHandler):
                     'response': response_text
                 }).encode())
 
-            # Clean up old response after delivery
-            # (keep for a bit in case of retries)
+    def handle_response_ack(self):
+        """Handle POST /api/response/<id>/ack - watch confirms receipt"""
+        # Extract request_id from path like /api/response/abc123/ack
+        parts = self.path.split('/')
+        request_id = parts[3] if len(parts) >= 4 else ""
+
+        if request_id not in claude_responses:
+            self.send_response(404)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({'status': 'not_found'}).encode())
+            return
+
+        response_data = claude_responses[request_id]
+
+        # Mark as delivered (only once)
+        if not response_data.get('delivered'):
+            response_data['delivered'] = True
+            add_response_step(request_id, {
+                'name': 'watch_received',
+                'label': 'Watch Received',
+                'status': 'completed',
+                'timestamp': datetime.now().isoformat(),
+                'details': 'Confirmed by watch'
+            })
+            print(f"[ACK] Watch confirmed receipt for {request_id}")
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps({'status': 'ok'}).encode())
+
+    def handle_audio_file(self):
+        """Serve audio file for a request"""
+        request_id = self.path.split('/')[-1]
+
+        if request_id not in claude_responses:
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        audio_path = claude_responses[request_id].get('audio_path')
+        if not audio_path or not os.path.exists(audio_path):
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        # Serve the audio file
+        self.send_response(200)
+        self.send_header('Content-Type', 'audio/mpeg')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        with open(audio_path, 'rb') as f:
+            audio_data = f.read()
+        self.send_header('Content-Length', str(len(audio_data)))
+        self.end_headers()
+        self.wfile.write(audio_data)
 
     def serve_dashboard(self):
         """Serve the Vue.js dashboard"""

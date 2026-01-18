@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Bundle
@@ -25,8 +26,10 @@ import kotlinx.coroutines.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 
 class MainActivity : Activity() {
@@ -47,6 +50,7 @@ class MainActivity : Activity() {
     private lateinit var progressBar: ProgressBar
 
     private var mediaRecorder: MediaRecorder? = null
+    private var mediaPlayer: MediaPlayer? = null
     private var audioFile: File? = null
     private var isRecording = false
 
@@ -136,6 +140,8 @@ class MainActivity : Activity() {
         super.onDestroy()
         coroutineScope.cancel()
         stopRecording()
+        mediaPlayer?.release()
+        mediaPlayer = null
         httpClient.dispatcher.executorService.shutdown()
     }
 
@@ -252,16 +258,22 @@ class MainActivity : Activity() {
                         val json = JSONObject(responseBody)
                         val requestId = json.optString("request_id", "")
                         val transcript = json.optString("transcript", "")
+                        val responseEnabled = json.optBoolean("response_enabled", false)
 
-                        if (requestId.isNotEmpty()) {
+                        if (requestId.isNotEmpty() && responseEnabled) {
                             showStatus("Waiting for Claude...")
                             // Start polling for response
                             pollForResponse(requestId)
                         } else {
-                            showStatus("Sent: $transcript")
+                            // Response disabled or no request ID
+                            showStatus("Sent to Claude")
+                            progressBar.visibility = View.GONE
+                            recordButton.isEnabled = true
                         }
                     } catch (e: Exception) {
                         showStatus("Sent successfully!")
+                        progressBar.visibility = View.GONE
+                        recordButton.isEnabled = true
                     }
 
                     vibrate(50)
@@ -287,7 +299,9 @@ class MainActivity : Activity() {
         coroutineScope.launch {
             var attempts = 0
             while (attempts < MAX_POLL_ATTEMPTS) {
-                delay(POLL_INTERVAL_MS)
+                // First poll faster (1.5s), then normal interval (5s)
+                val delayMs = if (attempts == 0) 1500L else POLL_INTERVAL_MS
+                delay(delayMs)
                 attempts++
 
                 try {
@@ -304,14 +318,27 @@ class MainActivity : Activity() {
                             progressBar.visibility = View.GONE
                             recordButton.isEnabled = true
 
-                            if (type == "text") {
+                            if (type == "audio") {
+                                val audioUrl = result.optString("audio_url", "")
+                                if (audioUrl.isNotEmpty()) {
+                                    showStatus("Playing response...")
+                                    playAudioResponse(audioUrl, requestId)
+                                } else {
+                                    showNotification(response)
+                                    showStatus("Response received!")
+                                    sendAck(requestId)
+                                }
+                            } else {
                                 showNotification(response)
                                 showStatus("Response received!")
-                            } else {
-                                // TODO: Handle audio response
-                                showStatus("Audio response")
+                                sendAck(requestId)
                             }
                             vibrate(longArrayOf(0, 100, 50, 100))
+                            return@launch
+                        } else if (status == "disabled") {
+                            progressBar.visibility = View.GONE
+                            recordButton.isEnabled = true
+                            showStatus("Sent to Claude")
                             return@launch
                         } else if (status == "not_found") {
                             Log.w(TAG, "Request not found on server")
@@ -353,6 +380,91 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             Log.e(TAG, "Error checking response", e)
             null
+        }
+    }
+
+    private fun playAudioResponse(audioPath: String, requestId: String) {
+        coroutineScope.launch {
+            try {
+                val audioData = withContext(Dispatchers.IO) {
+                    downloadAudio(audioPath)
+                }
+
+                if (audioData != null) {
+                    // Save to temp file and play
+                    val tempFile = File.createTempFile("response_", ".mp3", cacheDir)
+                    tempFile.writeBytes(audioData)
+
+                    mediaPlayer?.release()
+                    mediaPlayer = MediaPlayer().apply {
+                        setDataSource(tempFile.absolutePath)
+                        setOnCompletionListener {
+                            showStatus("Done")
+                            tempFile.delete()
+                            it.release()
+                            // Send ack after audio finishes playing
+                            sendAck(requestId)
+                        }
+                        setOnErrorListener { _, _, _ ->
+                            showStatus("Audio error", isError = true)
+                            tempFile.delete()
+                            true
+                        }
+                        prepare()
+                        start()
+                    }
+                    showStatus("Playing...")
+                } else {
+                    showStatus("Audio download failed", isError = true)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error playing audio", e)
+                showStatus("Audio error", isError = true)
+            }
+        }
+    }
+
+    private fun downloadAudio(audioPath: String): ByteArray? {
+        return try {
+            val baseUrl = SettingsActivity.getServerUrl(this).replace("/transcribe", "")
+            val url = "$baseUrl$audioPath"
+
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+
+            if (response.isSuccessful) {
+                response.body?.bytes()
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error downloading audio", e)
+            null
+        }
+    }
+
+    private fun sendAck(requestId: String) {
+        coroutineScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val baseUrl = SettingsActivity.getServerUrl(this@MainActivity).replace("/transcribe", "")
+                    val url = "$baseUrl/api/response/$requestId/ack"
+
+                    val request = Request.Builder()
+                        .url(url)
+                        .post("".toByteArray().toRequestBody(null))
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    Log.d(TAG, "Ack sent for $requestId: ${response.code}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending ack", e)
+            }
         }
     }
 
