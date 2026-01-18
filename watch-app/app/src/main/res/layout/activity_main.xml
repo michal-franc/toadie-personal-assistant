@@ -39,6 +39,7 @@
                 android:textAlignment="center"
                 android:layout_marginBottom="16dp" />
 
+            <!-- Normal state: Record button -->
             <Button
                 android:id="@+id/recordButton"
                 android:layout_width="100dp"
@@ -48,6 +49,66 @@
                 android:textColor="@android:color/white"
                 android:background="@drawable/round_button"
                 android:stateListAnimator="@null" />
+
+            <!-- Waiting state: Abort button -->
+            <Button
+                android:id="@+id/abortButton"
+                android:layout_width="100dp"
+                android:layout_height="100dp"
+                android:text="Abort"
+                android:textSize="14sp"
+                android:textColor="@android:color/white"
+                android:background="@drawable/round_button"
+                android:backgroundTint="@android:color/holo_orange_dark"
+                android:stateListAnimator="@null"
+                android:visibility="gone" />
+
+            <!-- Audio playback controls -->
+            <LinearLayout
+                android:id="@+id/audioControls"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <Button
+                    android:id="@+id/replayButton"
+                    android:layout_width="70dp"
+                    android:layout_height="70dp"
+                    android:text="Replay"
+                    android:textSize="11sp"
+                    android:textColor="@android:color/white"
+                    android:background="@drawable/round_button"
+                    android:backgroundTint="@android:color/holo_green_dark"
+                    android:stateListAnimator="@null"
+                    android:layout_marginEnd="8dp" />
+
+                <Button
+                    android:id="@+id/pauseButton"
+                    android:layout_width="70dp"
+                    android:layout_height="70dp"
+                    android:text="Pause"
+                    android:textSize="11sp"
+                    android:textColor="@android:color/white"
+                    android:background="@drawable/round_button"
+                    android:backgroundTint="@android:color/holo_blue_dark"
+                    android:stateListAnimator="@null" />
+
+            </LinearLayout>
+
+            <!-- Done button (after audio finishes) -->
+            <Button
+                android:id="@+id/doneButton"
+                android:layout_width="100dp"
+                android:layout_height="100dp"
+                android:text="Done"
+                android:textSize="14sp"
+                android:textColor="@android:color/white"
+                android:background="@drawable/round_button"
+                android:backgroundTint="@android:color/holo_green_dark"
+                android:stateListAnimator="@null"
+                android:visibility="gone" />
 
             <ProgressBar
                 android:id="@+id/progressBar"

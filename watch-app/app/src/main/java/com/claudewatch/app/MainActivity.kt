@@ -15,6 +15,7 @@ import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.app.Activity
@@ -29,7 +30,6 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 
 class MainActivity : Activity() {
@@ -44,15 +44,27 @@ class MainActivity : Activity() {
         private const val MAX_POLL_ATTEMPTS = 24     // 2 minutes max
     }
 
+    // UI elements
     private lateinit var recordButton: Button
+    private lateinit var abortButton: Button
+    private lateinit var audioControls: LinearLayout
+    private lateinit var replayButton: Button
+    private lateinit var pauseButton: Button
+    private lateinit var doneButton: Button
     private lateinit var settingsButton: ImageButton
     private lateinit var statusText: TextView
     private lateinit var progressBar: ProgressBar
 
+    // State
     private var mediaRecorder: MediaRecorder? = null
     private var mediaPlayer: MediaPlayer? = null
     private var audioFile: File? = null
     private var isRecording = false
+    private var isWaitingForResponse = false
+    private var isPlayingAudio = false
+    private var currentAudioFile: File? = null
+    private var currentRequestId: String? = null
+    private var pollingJob: Job? = null
 
     private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
     private val httpClient = OkHttpClient.Builder()
@@ -65,15 +77,23 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // Initialize UI elements
         recordButton = findViewById(R.id.recordButton)
+        abortButton = findViewById(R.id.abortButton)
+        audioControls = findViewById(R.id.audioControls)
+        replayButton = findViewById(R.id.replayButton)
+        pauseButton = findViewById(R.id.pauseButton)
+        doneButton = findViewById(R.id.doneButton)
         settingsButton = findViewById(R.id.settingsButton)
         statusText = findViewById(R.id.statusText)
         progressBar = findViewById(R.id.progressBar)
 
-        recordButton.setOnClickListener {
-            onRecordButtonClick()
-        }
-
+        // Set up click listeners
+        recordButton.setOnClickListener { onRecordButtonClick() }
+        abortButton.setOnClickListener { onAbortClick() }
+        replayButton.setOnClickListener { onReplayClick() }
+        pauseButton.setOnClickListener { onPauseClick() }
+        doneButton.setOnClickListener { onDoneClick() }
         settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -81,7 +101,7 @@ class MainActivity : Activity() {
         createNotificationChannel()
         requestNotificationPermission()
 
-        // Auto-start recording on launch
+        // Auto-start recording on launch (only if not waiting)
         autoStartRecording()
     }
 
@@ -114,15 +134,34 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        // Second button press - toggle recording
-        if (isRecording) {
-            stopRecordingAndSend()
-        } else {
-            autoStartRecording()
+        // Button press behavior depends on state
+        when {
+            isPlayingAudio -> {
+                // Toggle pause/play
+                onPauseClick()
+            }
+            isWaitingForResponse -> {
+                // Abort waiting
+                onAbortClick()
+            }
+            isRecording -> {
+                // Stop and send
+                stopRecordingAndSend()
+            }
+            else -> {
+                // Start recording
+                autoStartRecording()
+            }
         }
     }
 
     private fun autoStartRecording() {
+        // Don't start recording if waiting for response or playing audio
+        if (isWaitingForResponse || isPlayingAudio) {
+            Log.d(TAG, "Skipping auto-record: waiting=$isWaitingForResponse, playing=$isPlayingAudio")
+            return
+        }
+
         if (checkPermission()) {
             if (!isRecording) {
                 startRecording()
@@ -138,10 +177,12 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        pollingJob?.cancel()
         coroutineScope.cancel()
         stopRecording()
         mediaPlayer?.release()
         mediaPlayer = null
+        currentAudioFile?.delete()
         httpClient.dispatcher.executorService.shutdown()
     }
 
@@ -155,6 +196,55 @@ class MainActivity : Activity() {
                 PERMISSION_REQUEST_CODE
             )
         }
+    }
+
+    private fun onAbortClick() {
+        Log.d(TAG, "Aborting wait for response")
+        pollingJob?.cancel()
+        pollingJob = null
+        isWaitingForResponse = false
+        currentRequestId = null
+        showStatus("Cancelled")
+        vibrate(50)
+        updateUIState()
+    }
+
+    private fun onPauseClick() {
+        mediaPlayer?.let { player ->
+            if (player.isPlaying) {
+                player.pause()
+                pauseButton.text = "Play"
+                showStatus("Paused")
+            } else {
+                player.start()
+                pauseButton.text = "Pause"
+                showStatus("Playing...")
+            }
+        }
+    }
+
+    private fun onReplayClick() {
+        currentAudioFile?.let { file ->
+            if (file.exists()) {
+                playAudioFile(file)
+            }
+        }
+    }
+
+    private fun onDoneClick() {
+        // Clean up and return to normal state
+        mediaPlayer?.release()
+        mediaPlayer = null
+        currentAudioFile?.delete()
+        currentAudioFile = null
+        isPlayingAudio = false
+
+        // Send ack if we have a request ID
+        currentRequestId?.let { sendAck(it) }
+        currentRequestId = null
+
+        showStatus("Tap to record")
+        updateUIState()
     }
 
     override fun onRequestPermissionsResult(
@@ -189,7 +279,6 @@ class MainActivity : Activity() {
 
     private fun startRecording() {
         try {
-            // Create temp file for recording
             audioFile = File.createTempFile("recording_", ".m4a", cacheDir)
 
             mediaRecorder = MediaRecorder().apply {
@@ -205,7 +294,7 @@ class MainActivity : Activity() {
 
             isRecording = true
             vibrate(50)
-            updateUI()
+            updateUIState()
             showStatus("Recording...")
             Log.d(TAG, "Recording started: ${audioFile?.absolutePath}")
 
@@ -233,7 +322,7 @@ class MainActivity : Activity() {
         }
         mediaRecorder = null
         isRecording = false
-        updateUI()
+        updateUIState()
     }
 
     private fun sendRecording() {
@@ -244,7 +333,6 @@ class MainActivity : Activity() {
 
         showStatus("Sending...")
         progressBar.visibility = View.VISIBLE
-        recordButton.isEnabled = false
 
         coroutineScope.launch {
             try {
@@ -257,23 +345,22 @@ class MainActivity : Activity() {
                     try {
                         val json = JSONObject(responseBody)
                         val requestId = json.optString("request_id", "")
-                        val transcript = json.optString("transcript", "")
                         val responseEnabled = json.optBoolean("response_enabled", false)
 
                         if (requestId.isNotEmpty() && responseEnabled) {
+                            // Enter waiting state
+                            isWaitingForResponse = true
+                            currentRequestId = requestId
+                            updateUIState()
                             showStatus("Waiting for Claude...")
-                            // Start polling for response
                             pollForResponse(requestId)
                         } else {
-                            // Response disabled or no request ID
                             showStatus("Sent to Claude")
                             progressBar.visibility = View.GONE
-                            recordButton.isEnabled = true
                         }
                     } catch (e: Exception) {
                         showStatus("Sent successfully!")
                         progressBar.visibility = View.GONE
-                        recordButton.isEnabled = true
                     }
 
                     vibrate(50)
@@ -283,23 +370,20 @@ class MainActivity : Activity() {
                     showStatus("Failed: ${result.exceptionOrNull()?.message}", isError = true)
                     vibrate(longArrayOf(0, 100, 100, 100))
                     progressBar.visibility = View.GONE
-                    recordButton.isEnabled = true
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending recording", e)
                 showStatus("Error: ${e.message}", isError = true)
                 vibrate(longArrayOf(0, 100, 100, 100))
                 progressBar.visibility = View.GONE
-                recordButton.isEnabled = true
             }
         }
     }
 
     private fun pollForResponse(requestId: String) {
-        coroutineScope.launch {
+        pollingJob = coroutineScope.launch {
             var attempts = 0
-            while (attempts < MAX_POLL_ATTEMPTS) {
-                // First poll faster (1.5s), then normal interval (5s)
+            while (attempts < MAX_POLL_ATTEMPTS && isActive) {
                 val delayMs = if (attempts == 0) 1500L else POLL_INTERVAL_MS
                 delay(delayMs)
                 attempts++
@@ -316,35 +400,40 @@ class MainActivity : Activity() {
                             val type = result.optString("type", "text")
 
                             progressBar.visibility = View.GONE
-                            recordButton.isEnabled = true
+                            isWaitingForResponse = false
 
                             if (type == "audio") {
                                 val audioUrl = result.optString("audio_url", "")
                                 if (audioUrl.isNotEmpty()) {
-                                    showStatus("Playing response...")
-                                    playAudioResponse(audioUrl, requestId)
+                                    showStatus("Loading audio...")
+                                    downloadAndPlayAudio(audioUrl, requestId)
                                 } else {
                                     showNotification(response)
                                     showStatus("Response received!")
                                     sendAck(requestId)
+                                    currentRequestId = null
+                                    updateUIState()
                                 }
                             } else {
                                 showNotification(response)
                                 showStatus("Response received!")
                                 sendAck(requestId)
+                                currentRequestId = null
+                                updateUIState()
                             }
                             vibrate(longArrayOf(0, 100, 50, 100))
                             return@launch
                         } else if (status == "disabled") {
                             progressBar.visibility = View.GONE
-                            recordButton.isEnabled = true
+                            isWaitingForResponse = false
+                            currentRequestId = null
                             showStatus("Sent to Claude")
+                            updateUIState()
                             return@launch
                         } else if (status == "not_found") {
                             Log.w(TAG, "Request not found on server")
                             break
                         }
-                        // status == "pending", continue polling
                         showStatus("Waiting... (${attempts})")
                     }
                 } catch (e: Exception) {
@@ -354,8 +443,10 @@ class MainActivity : Activity() {
 
             // Timeout or error
             progressBar.visibility = View.GONE
-            recordButton.isEnabled = true
+            isWaitingForResponse = false
+            currentRequestId = null
             showStatus("Response timeout")
+            updateUIState()
         }
     }
 
@@ -383,7 +474,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun playAudioResponse(audioPath: String, requestId: String) {
+    private fun downloadAndPlayAudio(audioPath: String, requestId: String) {
         coroutineScope.launch {
             try {
                 val audioData = withContext(Dispatchers.IO) {
@@ -391,37 +482,49 @@ class MainActivity : Activity() {
                 }
 
                 if (audioData != null) {
-                    // Save to temp file and play
+                    // Save to temp file
                     val tempFile = File.createTempFile("response_", ".mp3", cacheDir)
                     tempFile.writeBytes(audioData)
+                    currentAudioFile = tempFile
+                    currentRequestId = requestId
 
-                    mediaPlayer?.release()
-                    mediaPlayer = MediaPlayer().apply {
-                        setDataSource(tempFile.absolutePath)
-                        setOnCompletionListener {
-                            showStatus("Done")
-                            tempFile.delete()
-                            it.release()
-                            // Send ack after audio finishes playing
-                            sendAck(requestId)
-                        }
-                        setOnErrorListener { _, _, _ ->
-                            showStatus("Audio error", isError = true)
-                            tempFile.delete()
-                            true
-                        }
-                        prepare()
-                        start()
-                    }
-                    showStatus("Playing...")
+                    // Enter audio playback state
+                    isPlayingAudio = true
+                    updateUIState()
+
+                    // Play the audio
+                    playAudioFile(tempFile)
                 } else {
                     showStatus("Audio download failed", isError = true)
+                    updateUIState()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error playing audio", e)
+                Log.e(TAG, "Error downloading audio", e)
                 showStatus("Audio error", isError = true)
+                updateUIState()
             }
         }
+    }
+
+    private fun playAudioFile(file: File) {
+        mediaPlayer?.release()
+        mediaPlayer = MediaPlayer().apply {
+            setDataSource(file.absolutePath)
+            setOnCompletionListener {
+                showStatus("Done - tap to replay")
+                pauseButton.text = "Play"
+                // Show done button, keep audio controls
+                doneButton.visibility = View.VISIBLE
+            }
+            setOnErrorListener { _, _, _ ->
+                showStatus("Audio error", isError = true)
+                true
+            }
+            prepare()
+            start()
+        }
+        pauseButton.text = "Pause"
+        showStatus("Playing...")
     }
 
     private fun downloadAudio(audioPath: String): ByteArray? {
@@ -469,7 +572,6 @@ class MainActivity : Activity() {
     }
 
     private fun showNotification(message: String) {
-        // Truncate for notification, full text will be in expanded view
         val shortMessage = if (message.length > 100) message.take(100) + "..." else message
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -485,7 +587,6 @@ class MainActivity : Activity() {
             NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, builder.build())
         } catch (e: SecurityException) {
             Log.e(TAG, "No notification permission", e)
-            // Show on screen instead
             showStatus(shortMessage)
         }
     }
@@ -523,17 +624,48 @@ class MainActivity : Activity() {
         audioFile?.delete()
         audioFile = null
         isRecording = false
-        updateUI()
+        updateUIState()
     }
 
-    private fun updateUI() {
-        recordButton.text = if (isRecording) "Stop & Send" else "Record"
-        recordButton.setBackgroundColor(
-            if (isRecording)
-                ContextCompat.getColor(this, android.R.color.holo_red_dark)
-            else
-                ContextCompat.getColor(this, android.R.color.holo_blue_dark)
-        )
+    private fun updateUIState() {
+        when {
+            isPlayingAudio -> {
+                // Audio playback state
+                recordButton.visibility = View.GONE
+                abortButton.visibility = View.GONE
+                audioControls.visibility = View.VISIBLE
+                doneButton.visibility = View.GONE  // Will show after audio completes
+                progressBar.visibility = View.GONE
+            }
+            isWaitingForResponse -> {
+                // Waiting for response state
+                recordButton.visibility = View.GONE
+                abortButton.visibility = View.VISIBLE
+                audioControls.visibility = View.GONE
+                doneButton.visibility = View.GONE
+                progressBar.visibility = View.VISIBLE
+            }
+            isRecording -> {
+                // Recording state
+                recordButton.visibility = View.VISIBLE
+                recordButton.text = "Stop & Send"
+                recordButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
+                abortButton.visibility = View.GONE
+                audioControls.visibility = View.GONE
+                doneButton.visibility = View.GONE
+                progressBar.visibility = View.GONE
+            }
+            else -> {
+                // Normal/idle state
+                recordButton.visibility = View.VISIBLE
+                recordButton.text = "Record"
+                recordButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_blue_dark))
+                abortButton.visibility = View.GONE
+                audioControls.visibility = View.GONE
+                doneButton.visibility = View.GONE
+                progressBar.visibility = View.GONE
+            }
+        }
     }
 
     private fun showStatus(message: String, isError: Boolean = false) {
