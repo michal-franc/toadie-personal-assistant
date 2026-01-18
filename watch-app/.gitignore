@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+*/build/
+
+# IDE
+.idea/
+*.iml
+local.properties
+
+# OS
+.DS_Store
+
+# APKs
+*.apk
+*.ap_
+
+# Generated
+captures/
+.externalNativeBuild/
+.cxx/
