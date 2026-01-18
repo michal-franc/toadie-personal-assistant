@@ -46,6 +46,9 @@ LAUNCH_COOLDOWN = 5  # seconds
 # Working directory for Claude (set via CLI argument)
 claude_workdir = None
 
+# Track the Claude process for reuse
+claude_process = None
+
 # Request history for dashboard
 request_history = []
 MAX_HISTORY = 100
@@ -86,17 +89,82 @@ def transcribe_audio(audio_data: bytes) -> str:
     return transcript
 
 
+def is_claude_running():
+    """Check if the tracked Claude process is still running"""
+    global claude_process
+    if claude_process is None:
+        return False
+    # Check if process is still alive
+    poll = claude_process.poll()
+    if poll is None:
+        return True
+    # Process has exited
+    claude_process = None
+    return False
+
+
+def send_to_existing_claude(text: str) -> bool:
+    """Send text to existing Claude window using xdotool"""
+    try:
+        # Find Claude window (alacritty running claude)
+        result = subprocess.run(
+            ['xdotool', 'search', '--name', 'claude'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        window_ids = result.stdout.strip().split('\n')
+        window_ids = [w for w in window_ids if w]
+
+        if not window_ids:
+            print("[CLAUDE] No existing Claude window found")
+            return False
+
+        window_id = window_ids[0]
+        print(f"[CLAUDE] Found existing window: {window_id}")
+
+        # Focus the window
+        subprocess.run(['xdotool', 'windowactivate', window_id], timeout=5)
+        time.sleep(0.1)
+
+        # Type the text and press Enter
+        subprocess.run(['xdotool', 'type', '--clearmodifiers', text], timeout=30)
+        subprocess.run(['xdotool', 'key', 'Return'], timeout=5)
+
+        print(f"[CLAUDE] Sent prompt to existing window")
+        return True
+
+    except subprocess.TimeoutExpired:
+        print("[CLAUDE] Timeout sending to existing window")
+        return False
+    except Exception as e:
+        print(f"[CLAUDE] Error sending to existing window: {e}")
+        return False
+
+
 def run_claude(text: str):
-    """Open Claude in alacritty terminal with the given text"""
-    global last_claude_launch
+    """Open Claude in alacritty terminal or send to existing instance"""
+    global last_claude_launch, claude_process
     now = time.time()
+
+    # Check if we can reuse existing Claude
+    if is_claude_running():
+        print("[CLAUDE] Attempting to reuse existing Claude instance")
+        if send_to_existing_claude(text):
+            last_claude_launch = now
+            return True
+        print("[CLAUDE] Failed to reuse, will spawn new instance")
+
+    # Cooldown only applies to spawning new instances
     if now - last_claude_launch < LAUNCH_COOLDOWN:
         print(f"[GUARD] Skipping Claude launch - cooldown active ({LAUNCH_COOLDOWN}s)")
         return False
+
     last_claude_launch = now
-    subprocess.Popen(
+    claude_process = subprocess.Popen(
         ['alacritty', '--working-directory', claude_workdir, '-e', 'claude', text]
     )
+    print(f"[CLAUDE] Spawned new Claude instance (PID: {claude_process.pid})")
     return True
 
 
