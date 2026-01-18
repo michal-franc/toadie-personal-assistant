@@ -101,9 +101,15 @@ def is_tmux_session_running() -> bool:
 def send_to_tmux_session(text: str) -> bool:
     """Send text to existing Claude tmux session"""
     try:
-        # Send the text followed by Enter
+        # Send the text
         subprocess.run(
-            ['tmux', 'send-keys', '-t', CLAUDE_TMUX_SESSION, text, 'Enter'],
+            ['tmux', 'send-keys', '-t', CLAUDE_TMUX_SESSION, text],
+            check=True,
+            timeout=10
+        )
+        # Send Enter (C-m is Ctrl-M which equals Enter)
+        subprocess.run(
+            ['tmux', 'send-keys', '-t', CLAUDE_TMUX_SESSION, 'C-m'],
             check=True,
             timeout=10
         )
