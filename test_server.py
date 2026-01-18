@@ -228,6 +228,50 @@ class TestDictationHandler:
 
         handler.send_response.assert_called_with(404)
 
+    @patch.object(server.DictationHandler, '__init__', lambda x, *args: None)
+    def test_do_get_api_history(self):
+        """Should return history JSON"""
+        server.request_history = [
+            {'id': 1, 'transcript': 'test', 'status': 'completed'}
+        ]
+        server.claude_workdir = '/test/dir'
+
+        handler = server.DictationHandler()
+        handler.path = '/api/history'
+        handler.wfile = BytesIO()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        handler.do_GET()
+
+        handler.send_response.assert_called_with(200)
+        response = handler.wfile.getvalue()
+        data = json.loads(response)
+        assert data['workdir'] == '/test/dir'
+        assert len(data['history']) == 1
+        assert data['history'][0]['transcript'] == 'test'
+
+        # Cleanup
+        server.request_history = []
+
+    @patch.object(server.DictationHandler, '__init__', lambda x, *args: None)
+    def test_do_get_dashboard(self):
+        """Should serve dashboard HTML"""
+        handler = server.DictationHandler()
+        handler.path = '/'
+        handler.wfile = BytesIO()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        handler.do_GET()
+
+        handler.send_response.assert_called_with(200)
+        response = handler.wfile.getvalue()
+        assert b'<!DOCTYPE html>' in response
+        assert b'Claude Watch' in response
+
 
 class TestMainArgumentParsing:
     """Tests for main() argument parsing"""

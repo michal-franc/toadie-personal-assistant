@@ -39,11 +39,16 @@ client = DeepgramClient()
 
 # Guard against duplicate Claude launches
 import time
+from datetime import datetime
 last_claude_launch = 0
 LAUNCH_COOLDOWN = 5  # seconds
 
 # Working directory for Claude (set via CLI argument)
 claude_workdir = None
+
+# Request history for dashboard
+request_history = []
+MAX_HISTORY = 100
 
 
 def transcribe_audio(audio_data: bytes) -> str:
@@ -125,12 +130,81 @@ class DictationHandler(BaseHTTPRequestHandler):
             print(f"First 20 bytes (hex): {audio_data[:20].hex()}")
         print(f"========================")
 
-        try:
-            transcript = transcribe_audio(audio_data)
-            print(f"Transcript: {transcript}")
+        received_at = datetime.now()
+        entry = {
+            'id': len(request_history) + 1,
+            'timestamp': received_at.isoformat(),
+            'content_type': content_type,
+            'size_bytes': content_length,
+            'transcript': None,
+            'claude_launched': False,
+            'status': 'processing',
+            'error': None,
+            'steps': [
+                {
+                    'name': 'received',
+                    'label': 'Received',
+                    'status': 'completed',
+                    'timestamp': received_at.isoformat(),
+                    'details': f'{content_length} bytes, {content_type}'
+                }
+            ]
+        }
 
+        try:
+            # Step 2: Sending to Deepgram
+            sending_at = datetime.now()
+            entry['steps'].append({
+                'name': 'sending',
+                'label': 'Sent to Deepgram',
+                'status': 'completed',
+                'timestamp': sending_at.isoformat(),
+                'details': 'Audio sent to cloud'
+            })
+
+            transcript = transcribe_audio(audio_data)
+            transcribed_at = datetime.now()
+            print(f"Transcript: {transcript}")
+            entry['transcript'] = transcript or ''
+
+            # Step 3: Transcribed
+            duration_ms = int((transcribed_at - sending_at).total_seconds() * 1000)
+            entry['steps'].append({
+                'name': 'transcribed',
+                'label': 'Transcribed',
+                'status': 'completed',
+                'timestamp': transcribed_at.isoformat(),
+                'duration_ms': duration_ms,
+                'details': transcript if transcript else 'No speech detected'
+            })
+
+            # Step 4: Claude
+            claude_at = datetime.now()
             if transcript:
-                run_claude(transcript)
+                launched = run_claude(transcript)
+                entry['claude_launched'] = launched
+                entry['status'] = 'completed'
+                entry['steps'].append({
+                    'name': 'claude',
+                    'label': 'Claude',
+                    'status': 'completed' if launched else 'skipped',
+                    'timestamp': claude_at.isoformat(),
+                    'details': 'Launched' if launched else 'Skipped (duplicate)'
+                })
+            else:
+                entry['status'] = 'no_speech'
+                entry['steps'].append({
+                    'name': 'claude',
+                    'label': 'Claude',
+                    'status': 'skipped',
+                    'timestamp': claude_at.isoformat(),
+                    'details': 'Skipped (no speech)'
+                })
+
+            # Add to history
+            request_history.insert(0, entry)
+            if len(request_history) > MAX_HISTORY:
+                request_history.pop()
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -143,6 +217,30 @@ class DictationHandler(BaseHTTPRequestHandler):
 
         except Exception as e:
             print(f"Error: {e}")
+            error_at = datetime.now()
+            entry['status'] = 'error'
+            entry['error'] = str(e)
+
+            # Mark current step as failed
+            if len(entry['steps']) > 0:
+                last_step = entry['steps'][-1]
+                if last_step['status'] != 'completed':
+                    last_step['status'] = 'error'
+                    last_step['error'] = str(e)
+                else:
+                    # Error happened after last step
+                    entry['steps'].append({
+                        'name': 'error',
+                        'label': 'Error',
+                        'status': 'error',
+                        'timestamp': error_at.isoformat(),
+                        'details': str(e)
+                    })
+
+            request_history.insert(0, entry)
+            if len(request_history) > MAX_HISTORY:
+                request_history.pop()
+
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -157,9 +255,36 @@ class DictationHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({'status': 'ok'}).encode())
+        elif self.path == '/api/history':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'history': request_history,
+                'workdir': claude_workdir
+            }).encode())
+        elif self.path == '/' or self.path == '/dashboard':
+            self.serve_dashboard()
         else:
             self.send_response(404)
             self.end_headers()
+
+    def serve_dashboard(self):
+        """Serve the Vue.js dashboard"""
+        dashboard_path = os.path.join(os.path.dirname(__file__), 'dashboard.html')
+        try:
+            with open(dashboard_path, 'rb') as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(content)
+        except FileNotFoundError:
+            self.send_response(404)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'Dashboard not found')
 
     def log_message(self, format, *args):
         print(f"[HTTP] {args[0]}")
@@ -188,6 +313,7 @@ def main():
     server = HTTPServer(('0.0.0.0', PORT), DictationHandler)
     print(f"Dictation receiver listening on port {PORT}")
     print(f"Claude working directory: {claude_workdir}")
+    print(f"Dashboard: http://localhost:{PORT}/")
     print(f"POST audio to http://localhost:{PORT}/transcribe")
 
     try:

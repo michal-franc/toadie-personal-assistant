@@ -10,9 +10,15 @@ HTTP server that receives audio from a smartwatch (via phone + Macrodroid), tran
 Watch → Phone → Macrodroid → server.py (port 5566) → Deepgram API → Claude Code (alacritty)
 ```
 
+## Project Tracking
+
+Ideas, bugs, and feature requests are tracked in GitHub Issues.
+
 ## Key Files
 
 - `server.py` - Main HTTP server
+- `dashboard.html` - Vue.js web dashboard
+- `test_server.py` - Unit tests
 - `README.md` - Setup instructions
 
 ## Technical Details
