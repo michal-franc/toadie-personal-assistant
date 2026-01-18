@@ -124,15 +124,15 @@ def send_to_existing_claude(text: str) -> bool:
         window_id = window_ids[0]
         print(f"[CLAUDE] Found claude-watch window: {window_id}")
 
-        # Focus the window
-        subprocess.run(['xdotool', 'windowactivate', window_id], timeout=5)
-        time.sleep(0.1)
+        # Type directly to window without focusing it
+        subprocess.run([
+            'xdotool', 'type', '--window', window_id, '--clearmodifiers', text
+        ], timeout=30)
+        subprocess.run([
+            'xdotool', 'key', '--window', window_id, 'Return'
+        ], timeout=5)
 
-        # Type the text and press Enter
-        subprocess.run(['xdotool', 'type', '--clearmodifiers', text], timeout=30)
-        subprocess.run(['xdotool', 'key', 'Return'], timeout=5)
-
-        print(f"[CLAUDE] Sent prompt to existing window")
+        print(f"[CLAUDE] Sent prompt to window {window_id} (no focus change)")
         return True
 
     except subprocess.TimeoutExpired:
