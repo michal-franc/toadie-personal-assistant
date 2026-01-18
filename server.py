@@ -50,15 +50,29 @@ claude_workdir = None
 request_history = []
 MAX_HISTORY = 100
 
+# Transcription configuration (modifiable via API)
+transcription_config = {
+    'model': 'nova-2',
+    'language': 'en-US',
+    'smart_format': True,
+    'punctuate': True
+}
+
+# Available options for configuration
+CONFIG_OPTIONS = {
+    'models': ['nova-2', 'nova', 'enhanced', 'base'],
+    'languages': ['en-US', 'pl']
+}
+
 
 def transcribe_audio(audio_data: bytes) -> str:
     """Transcribe m4a audio data using Deepgram (auto-detects format)"""
     response = client.listen.v1.media.transcribe_file(
         request=audio_data,
-        model="nova-2",
-        language="en-US",
-        smart_format=True,
-        punctuate=True,
+        model=transcription_config['model'],
+        language=transcription_config['language'],
+        smart_format=transcription_config['smart_format'],
+        punctuate=transcription_config['punctuate'],
     )
 
     transcript = ""
@@ -117,6 +131,11 @@ class DictationHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
         content_type = self.headers.get('Content-Type', 'unknown')
+
+        # Handle config update
+        if self.path == '/api/config':
+            self.handle_config_update(content_length)
+            return
 
         print(f"=== Incoming Request ===")
         print(f"Path: {self.path}")
@@ -264,11 +283,78 @@ class DictationHandler(BaseHTTPRequestHandler):
                 'history': request_history,
                 'workdir': claude_workdir
             }).encode())
+        elif self.path == '/api/config':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'config': transcription_config,
+                'options': CONFIG_OPTIONS
+            }).encode())
         elif self.path == '/' or self.path == '/dashboard':
             self.serve_dashboard()
         else:
             self.send_response(404)
             self.end_headers()
+
+    def handle_config_update(self, content_length):
+        """Handle POST /api/config to update transcription settings"""
+        global transcription_config
+        try:
+            body = self.rfile.read(content_length)
+            new_config = json.loads(body.decode())
+
+            # Validate and update config
+            errors = []
+
+            if 'model' in new_config:
+                if new_config['model'] in CONFIG_OPTIONS['models']:
+                    transcription_config['model'] = new_config['model']
+                else:
+                    errors.append(f"Invalid model: {new_config['model']}")
+
+            if 'language' in new_config:
+                if new_config['language'] in CONFIG_OPTIONS['languages']:
+                    transcription_config['language'] = new_config['language']
+                else:
+                    errors.append(f"Invalid language: {new_config['language']}")
+
+            if 'smart_format' in new_config:
+                transcription_config['smart_format'] = bool(new_config['smart_format'])
+
+            if 'punctuate' in new_config:
+                transcription_config['punctuate'] = bool(new_config['punctuate'])
+
+            if errors:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'status': 'error',
+                    'errors': errors
+                }).encode())
+            else:
+                print(f"[CONFIG] Updated: {transcription_config}")
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'status': 'ok',
+                    'config': transcription_config
+                }).encode())
+
+        except json.JSONDecodeError as e:
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'status': 'error',
+                'message': f'Invalid JSON: {e}'
+            }).encode())
 
     def serve_dashboard(self):
         """Serve the Vue.js dashboard"""

@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Watch Dashboard</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #333;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+    .workdir {
+      font-size: 0.85rem;
+      color: #888;
+      font-family: monospace;
+      background: #252540;
+      padding: 6px 12px;
+      border-radius: 4px;
+    }
+    .settings-btn {
+      background: #252540;
+      border: 1px solid #333;
+      color: #888;
+      padding: 8px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .settings-btn:hover {
+      background: #333;
+      color: #eee;
+    }
+    .status-bar {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 20px;
+      font-size: 0.9rem;
+    }
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .dot.green { background: #4ade80; }
+    .dot.yellow { background: #facc15; }
+    .dot.red { background: #f87171; }
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .history-item {
+      background: #252540;
+      border-radius: 8px;
+      padding: 16px;
+      border-left: 4px solid #666;
+    }
+    .history-item.completed { border-left-color: #4ade80; }
+    .history-item.no_speech { border-left-color: #facc15; }
+    .history-item.error { border-left-color: #f87171; }
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .history-id {
+      font-weight: 600;
+      color: #888;
+    }
+    .history-time {
+      font-size: 0.8rem;
+      color: #666;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #666;
+    }
+    .error-msg {
+      color: #f87171;
+      font-size: 0.85rem;
+      margin-top: 8px;
+    }
+    .refresh-btn {
+      background: #333;
+      border: none;
+      color: #eee;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .refresh-btn:hover {
+      background: #444;
+    }
+    .auto-refresh {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: #888;
+    }
+
+    /* Workflow Timeline */
+    .workflow {
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      margin-bottom: 12px;
+    }
+    .workflow-step {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      cursor: pointer;
+    }
+    .workflow-step:hover .step-icon {
+      transform: scale(1.15);
+    }
+    .workflow-step:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      width: 100%;
+      height: 2px;
+      background: #333;
+      z-index: 0;
+    }
+    .workflow-step.completed:not(:last-child)::after {
+      background: #4ade80;
+    }
+    .workflow-step.error:not(:last-child)::after {
+      background: #f87171;
+    }
+    .step-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #333;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      z-index: 1;
+      position: relative;
+      transition: transform 0.15s ease;
+    }
+    .workflow-step.completed .step-icon {
+      background: #166534;
+      color: #4ade80;
+    }
+    .workflow-step.skipped .step-icon {
+      background: #854d0e;
+      color: #facc15;
+    }
+    .workflow-step.error .step-icon {
+      background: #991b1b;
+      color: #f87171;
+    }
+    .workflow-step.pending .step-icon {
+      background: #333;
+      color: #666;
+    }
+    .step-label {
+      font-size: 0.7rem;
+      color: #888;
+      margin-top: 6px;
+      text-align: center;
+    }
+    .workflow-step.completed .step-label {
+      color: #4ade80;
+    }
+    .workflow-step.error .step-label {
+      color: #f87171;
+    }
+
+    /* Transcript preview */
+    .transcript-preview {
+      font-size: 0.9rem;
+      color: #ccc;
+      padding: 8px 12px;
+      background: #1a1a2e;
+      border-radius: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .transcript-preview.empty {
+      color: #666;
+      font-style: italic;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal {
+      background: #252540;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      position: relative;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #333;
+    }
+    .modal-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 1.5rem;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+    }
+    .modal-close:hover {
+      color: #eee;
+    }
+    .modal-row {
+      display: flex;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+    .modal-label {
+      width: 100px;
+      color: #888;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+    .modal-value {
+      flex: 1;
+      font-size: 0.9rem;
+      word-break: break-word;
+    }
+    .modal-value.mono {
+      font-family: monospace;
+      background: #1a1a2e;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+    .modal-transcript {
+      background: #1a1a2e;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      margin-top: 8px;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .status-badge.completed {
+      background: #166534;
+      color: #4ade80;
+    }
+    .status-badge.skipped {
+      background: #854d0e;
+      color: #facc15;
+    }
+    .status-badge.error {
+      background: #991b1b;
+      color: #f87171;
+    }
+
+    /* Settings form */
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      color: #888;
+      font-size: 0.85rem;
+      margin-bottom: 6px;
+    }
+    .form-group select,
+    .form-group input[type="text"] {
+      width: 100%;
+      padding: 8px 12px;
+      background: #1a1a2e;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #eee;
+      font-size: 0.9rem;
+    }
+    .form-group select:focus,
+    .form-group input:focus {
+      outline: none;
+      border-color: #4ade80;
+    }
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .checkbox-group input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+    }
+    .checkbox-group label {
+      margin: 0;
+      color: #ccc;
+    }
+    .form-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid #333;
+    }
+    .btn {
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: #166534;
+      color: #4ade80;
+    }
+    .btn-primary:hover {
+      background: #15803d;
+    }
+    .btn-secondary {
+      background: #333;
+      color: #eee;
+    }
+    .btn-secondary:hover {
+      background: #444;
+    }
+    .config-badge {
+      font-size: 0.7rem;
+      color: #666;
+      background: #1a1a2e;
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="container">
+    <header>
+      <div class="header-left">
+        <h1>Claude Watch</h1>
+        <span class="config-badge" v-if="config.model">{{ config.model }} / {{ config.language }}</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div class="workdir" v-if="workdir">{{ workdir }}</div>
+        <button class="settings-btn" @click="openSettings">
+          <span>&#9881;</span> Settings
+        </button>
+      </div>
+    </header>
+
+    <div class="status-bar">
+      <div class="status-item">
+        <span class="dot green"></span>
+        <span>{{ stats.completed }} completed</span>
+      </div>
+      <div class="status-item">
+        <span class="dot yellow"></span>
+        <span>{{ stats.noSpeech }} no speech</span>
+      </div>
+      <div class="status-item">
+        <span class="dot red"></span>
+        <span>{{ stats.errors }} errors</span>
+      </div>
+      <div style="flex: 1"></div>
+      <div class="auto-refresh">
+        <input type="checkbox" id="autoRefresh" v-model="autoRefresh">
+        <label for="autoRefresh">Auto-refresh</label>
+      </div>
+      <button class="refresh-btn" @click="fetchHistory">Refresh</button>
+    </div>
+
+    <div class="history-list" v-if="history.length > 0">
+      <div
+        v-for="item in history"
+        :key="item.id"
+        class="history-item"
+        :class="item.status"
+      >
+        <div class="history-header">
+          <span class="history-id">#{{ item.id }}</span>
+          <span class="history-time">{{ formatTime(item.timestamp) }}</span>
+        </div>
+
+        <!-- Workflow Timeline -->
+        <div class="workflow" v-if="item.steps && item.steps.length > 0">
+          <div
+            v-for="(step, index) in item.steps"
+            :key="index"
+            class="workflow-step"
+            :class="step.status"
+            @click="openModal(item, step)"
+          >
+            <div class="step-icon">
+              <span v-if="step.status === 'completed'">&#10003;</span>
+              <span v-else-if="step.status === 'error'">&#10005;</span>
+              <span v-else-if="step.status === 'skipped'">&#8211;</span>
+              <span v-else>{{ index + 1 }}</span>
+            </div>
+            <div class="step-label">{{ step.label }}</div>
+          </div>
+        </div>
+
+        <!-- Transcript Preview -->
+        <div class="transcript-preview" v-if="item.transcript">
+          {{ item.transcript }}
+        </div>
+        <div class="transcript-preview empty" v-else>
+          No speech detected
+        </div>
+
+        <div class="error-msg" v-if="item.error">{{ item.error }}</div>
+      </div>
+    </div>
+
+    <div class="empty-state" v-else>
+      <p>No requests yet</p>
+      <p style="margin-top: 8px; font-size: 0.9rem;">Send audio to /transcribe to see history here</p>
+    </div>
+
+    <!-- Step Details Modal -->
+    <div class="modal-overlay" v-if="modal.visible" @click.self="closeModal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span>{{ modal.step?.label }}</span>
+            <span class="status-badge" :class="modal.step?.status">{{ modal.step?.status }}</span>
+          </div>
+          <button class="modal-close" @click="closeModal">&times;</button>
+        </div>
+
+        <!-- Received step -->
+        <template v-if="modal.step?.name === 'received'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Size</span>
+            <span class="modal-value mono">{{ formatSize(modal.item?.size_bytes) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Content-Type</span>
+            <span class="modal-value mono">{{ modal.item?.content_type }}</span>
+          </div>
+        </template>
+
+        <!-- Sending step -->
+        <template v-if="modal.step?.name === 'sending'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Service</span>
+            <span class="modal-value">Deepgram API</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Model</span>
+            <span class="modal-value mono">{{ config.model }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Language</span>
+            <span class="modal-value mono">{{ config.language }}</span>
+          </div>
+        </template>
+
+        <!-- Transcribed step -->
+        <template v-if="modal.step?.name === 'transcribed'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row" v-if="modal.step.duration_ms">
+            <span class="modal-label">Duration</span>
+            <span class="modal-value">{{ modal.step.duration_ms }}ms</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Transcript</span>
+          </div>
+          <div class="modal-transcript" v-if="modal.item?.transcript">
+            {{ modal.item.transcript }}
+          </div>
+          <div class="modal-transcript" v-else style="color: #666; font-style: italic;">
+            No speech detected
+          </div>
+        </template>
+
+        <!-- Claude step -->
+        <template v-if="modal.step?.name === 'claude'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Action</span>
+            <span class="modal-value">{{ modal.step.details }}</span>
+          </div>
+          <div class="modal-row" v-if="modal.item?.claude_launched">
+            <span class="modal-label">Working Dir</span>
+            <span class="modal-value mono">{{ workdir }}</span>
+          </div>
+        </template>
+
+        <!-- Error step -->
+        <template v-if="modal.step?.name === 'error' || modal.step?.error">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Error</span>
+            <span class="modal-value" style="color: #f87171;">{{ modal.step.error || modal.step.details }}</span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" v-if="settingsModal.visible" @click.self="closeSettings">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Settings</div>
+          <button class="modal-close" @click="closeSettings">&times;</button>
+        </div>
+
+        <div class="form-group">
+          <label>Model</label>
+          <select v-model="settingsModal.form.model">
+            <option v-for="m in configOptions.models" :key="m" :value="m">{{ m }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Language</label>
+          <select v-model="settingsModal.form.language">
+            <option v-for="l in configOptions.languages" :key="l" :value="l">{{ l }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <div class="checkbox-group">
+            <input type="checkbox" id="smartFormat" v-model="settingsModal.form.smart_format">
+            <label for="smartFormat">Smart Format</label>
+          </div>
+          <div style="font-size: 0.75rem; color: #666; margin-top: 4px;">
+            Automatically format numbers, dates, etc.
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="checkbox-group">
+            <input type="checkbox" id="punctuate" v-model="settingsModal.form.punctuate">
+            <label for="punctuate">Punctuate</label>
+          </div>
+          <div style="font-size: 0.75rem; color: #666; margin-top: 4px;">
+            Add punctuation to transcript
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn btn-primary" @click="saveSettings">Save</button>
+          <button class="btn btn-secondary" @click="closeSettings">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted, onUnmounted } = Vue
+
+    createApp({
+      setup() {
+        const history = ref([])
+        const workdir = ref('')
+        const autoRefresh = ref(true)
+        const modal = ref({ visible: false, item: null, step: null })
+        const config = ref({ model: '', language: '', smart_format: true, punctuate: true })
+        const configOptions = ref({ models: [], languages: [] })
+        const settingsModal = ref({
+          visible: false,
+          form: { model: '', language: '', smart_format: true, punctuate: true }
+        })
+        let intervalId = null
+
+        const stats = computed(() => ({
+          completed: history.value.filter(h => h.status === 'completed').length,
+          noSpeech: history.value.filter(h => h.status === 'no_speech').length,
+          errors: history.value.filter(h => h.status === 'error').length
+        }))
+
+        const fetchHistory = async () => {
+          try {
+            const res = await fetch('/api/history')
+            const data = await res.json()
+            history.value = data.history
+            workdir.value = data.workdir
+          } catch (e) {
+            console.error('Failed to fetch history:', e)
+          }
+        }
+
+        const fetchConfig = async () => {
+          try {
+            const res = await fetch('/api/config')
+            const data = await res.json()
+            config.value = data.config
+            configOptions.value = data.options
+          } catch (e) {
+            console.error('Failed to fetch config:', e)
+          }
+        }
+
+        const saveSettings = async () => {
+          try {
+            const res = await fetch('/api/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(settingsModal.value.form)
+            })
+            const data = await res.json()
+            if (data.status === 'ok') {
+              config.value = data.config
+              closeSettings()
+            } else {
+              alert('Error saving settings: ' + (data.errors?.join(', ') || data.message))
+            }
+          } catch (e) {
+            console.error('Failed to save config:', e)
+            alert('Failed to save settings')
+          }
+        }
+
+        const formatTime = (iso) => {
+          const d = new Date(iso)
+          return d.toLocaleTimeString()
+        }
+
+        const formatFullTime = (iso) => {
+          const d = new Date(iso)
+          return d.toLocaleString()
+        }
+
+        const formatSize = (bytes) => {
+          if (!bytes) return '0 B'
+          if (bytes < 1024) return bytes + ' B'
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+          return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+        }
+
+        const openModal = (item, step) => {
+          modal.value = { visible: true, item, step }
+        }
+
+        const closeModal = () => {
+          modal.value = { visible: false, item: null, step: null }
+        }
+
+        const openSettings = () => {
+          settingsModal.value.form = { ...config.value }
+          settingsModal.value.visible = true
+        }
+
+        const closeSettings = () => {
+          settingsModal.value.visible = false
+        }
+
+        const handleKeydown = (e) => {
+          if (e.key === 'Escape') {
+            if (modal.value.visible) closeModal()
+            if (settingsModal.value.visible) closeSettings()
+          }
+        }
+
+        onMounted(() => {
+          fetchHistory()
+          fetchConfig()
+          intervalId = setInterval(() => {
+            if (autoRefresh.value) fetchHistory()
+          }, 3000)
+          document.addEventListener('keydown', handleKeydown)
+        })
+
+        onUnmounted(() => {
+          if (intervalId) clearInterval(intervalId)
+          document.removeEventListener('keydown', handleKeydown)
+        })
+
+        return {
+          history,
+          workdir,
+          autoRefresh,
+          modal,
+          config,
+          configOptions,
+          settingsModal,
+          stats,
+          fetchHistory,
+          saveSettings,
+          formatTime,
+          formatFullTime,
+          formatSize,
+          openModal,
+          closeModal,
+          openSettings,
+          closeSettings
+        }
+      }
+    }).mount('#app')
+  </script>
+</body>
+</html>
