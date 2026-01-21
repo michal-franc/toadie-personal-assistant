@@ -5,8 +5,15 @@ Voice-to-Claude pipeline: Galaxy Watch -> Server -> Deepgram -> Claude Code -> R
 ## Key Files
 
 - `server.py` - HTTP server (port 5566) with response monitoring
+- `logger.py` - Logging configuration
 - `dashboard.html` - Vue.js 3 web dashboard
 - `watch-app/` - Kotlin Wear OS app
+
+## Logs
+
+- `/tmp/claude-watch.log` - Main server log (DEBUG level, detailed)
+- `/tmp/claude-watch-tts.log` - TTS-specific debug log
+- Console output shows INFO level and above
 
 ## Commands
 

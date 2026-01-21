@@ -15,6 +15,7 @@ Endpoints:
 
 import argparse
 import os
+import re
 import sys
 import socket
 import select
@@ -23,6 +24,8 @@ import threading
 import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
+
+from logger import logger
 
 # Load Deepgram API key
 API_KEY_FILE = "/tmp/deepgram_api_key"
@@ -61,7 +64,7 @@ RESPONSE_TIMEOUT = 120  # seconds to keep response in memory
 
 # Transcription configuration (modifiable via API)
 transcription_config = {
-    'model': 'nova-2',
+    'model': 'nova-3',
     'language': 'en-US',
     'smart_format': True,
     'punctuate': True
@@ -74,7 +77,7 @@ response_config = {
 
 # Available options for configuration
 CONFIG_OPTIONS = {
-    'models': ['nova-2', 'nova', 'enhanced', 'base'],
+    'models': ['nova-3', 'nova-2', 'nova', 'enhanced', 'base'],
     'languages': ['en-US', 'pl'],
     'response_modes': ['text', 'audio', 'disabled']
 }
@@ -232,13 +235,18 @@ def capture_tmux_output() -> str:
         )
         return result.stdout if result.returncode == 0 else ""
     except Exception as e:
-        print(f"[CAPTURE] Error capturing tmux output: {e}")
+        logger.error(f"Error capturing tmux output: {e}")
         return ""
+
+
+def strip_ansi(text):
+    """Remove ANSI escape codes from text"""
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 
 def monitor_claude_response(request_id: str, initial_output: str, prompt_text: str = ""):
     """Background thread to monitor Claude's response"""
-    print(f"[MONITOR] Starting monitor for request {request_id}, prompt: {prompt_text[:50]}...")
+    logger.info(f"Starting monitor for {request_id}, prompt: {prompt_text[:50]}...")
 
     # Add waiting step to history
     add_response_step(request_id, {
@@ -250,25 +258,45 @@ def monitor_claude_response(request_id: str, initial_output: str, prompt_text: s
     })
 
     # Wait a bit for Claude to start processing
-    time.sleep(1)
+    time.sleep(0.5)
 
     last_output = initial_output
     stable_count = 0
-    max_checks = 40  # More checks with variable intervals
+    max_checks = 120  # 60 seconds max
 
     for i in range(max_checks):
-        # Poll faster at the start (every 2s), then slow down (every 5s)
-        interval = 2 if i < 10 else 5
-        time.sleep(interval)
+        time.sleep(0.5)  # Poll every 500ms
 
         current_output = capture_tmux_output()
+        clean_output = strip_ansi(current_output)
 
-        # Check if output has changed
+        # Skip if nothing has changed yet
+        if current_output == initial_output:
+            continue
+
+        # Check if Claude is done - look for ❯ prompt at end of output
+        stripped = clean_output.rstrip()
+        if stripped:
+            last_line = stripped.split('\n')[-1]
+            has_bullet = '●' in clean_output
+            has_prompt = '❯' in last_line
+
+            # Debug: log every 10 checks
+            if i % 10 == 0:
+                logger.info(f"Check {i}: has_●={has_bullet} has_❯={has_prompt}")
+                logger.debug(f"last_line: {repr(last_line)}")
+                logger.debug(f"output tail:\n{clean_output[-300:]}")
+
+            # Prompt line contains ❯ and we've seen Claude respond (●)
+            if has_prompt and has_bullet:
+                logger.info(f"Detected ❯ prompt for {request_id}, Claude finished")
+                break
+
+        # Fallback: stability detection (but faster - 2 checks = 1s)
         if current_output == last_output:
             stable_count += 1
-            # If output hasn't changed for 3 checks (15s), assume Claude is done
-            if stable_count >= 3:
-                print(f"[MONITOR] Output stable for {request_id}, extracting response")
+            if stable_count >= 2:
+                logger.info(f"Output stable for {request_id} at check {i}, extracting response")
                 break
         else:
             stable_count = 0
