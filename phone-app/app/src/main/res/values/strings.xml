@@ -6,6 +6,8 @@
     <string name="server_address_summary">WebSocket server IP:port</string>
     <string name="kiosk_mode">Kiosk Mode</string>
     <string name="kiosk_mode_summary">Fullscreen mode (triple-tap corner to exit)</string>
+    <string name="auto_retry">Auto-retry Messages</string>
+    <string name="auto_retry_summary">Automatically resend failed messages on reconnect</string>
     <string name="connection_status">Connection Status</string>
     <string name="connected">Connected</string>
     <string name="disconnected">Disconnected</string>

@@ -438,6 +438,185 @@
       border-radius: 3px;
       margin-left: 8px;
     }
+
+    /* Chat Section */
+    .chat-section {
+      background: #252540;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .chat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: #1a1a2e;
+      border-bottom: 1px solid #333;
+    }
+    .chat-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .chat-state {
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .chat-state.idle { background: #333; color: #888; }
+    .chat-state.listening { background: #1e3a5f; color: #60a5fa; }
+    .chat-state.thinking { background: #854d0e; color: #facc15; animation: pulse 1.5s infinite; }
+    .chat-state.speaking { background: #166534; color: #4ade80; }
+    .chat-messages {
+      max-height: 300px;
+      overflow-y: auto;
+      padding: 12px;
+    }
+    .chat-message {
+      margin-bottom: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      max-width: 85%;
+    }
+    .chat-message:last-child {
+      margin-bottom: 0;
+    }
+    .chat-message.user {
+      background: #1e3a5f;
+      margin-left: auto;
+      border-bottom-right-radius: 4px;
+    }
+    .chat-message.claude {
+      background: #1a1a2e;
+      margin-right: auto;
+      border-bottom-left-radius: 4px;
+    }
+    .chat-message-role {
+      font-size: 0.7rem;
+      color: #888;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+    .chat-message.user .chat-message-role { color: #60a5fa; }
+    .chat-message.claude .chat-message-role { color: #4ade80; }
+    .chat-message-content {
+      font-size: 0.9rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .chat-message-time {
+      font-size: 0.65rem;
+      color: #666;
+      margin-top: 6px;
+      text-align: right;
+    }
+    .chat-empty {
+      text-align: center;
+      padding: 30px;
+      color: #666;
+      font-size: 0.9rem;
+    }
+    .section-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #888;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Prompt UI */
+    .prompt-box {
+      background: #1e3a5f;
+      border: 1px solid #60a5fa;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 12px;
+    }
+    .prompt-title {
+      font-size: 0.75rem;
+      color: #60a5fa;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    .prompt-context {
+      font-family: monospace;
+      font-size: 0.85rem;
+      color: #ccc;
+      background: #1a1a2e;
+      padding: 8px 12px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .prompt-question {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    .prompt-options {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .prompt-option {
+      background: #252540;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 10px 14px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .prompt-option:hover {
+      background: #333;
+      border-color: #60a5fa;
+    }
+    .prompt-option.selected {
+      border-color: #60a5fa;
+      background: #1e3a5f;
+    }
+    .prompt-option-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .prompt-option-num {
+      background: #333;
+      color: #888;
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .prompt-option.selected .prompt-option-num {
+      background: #60a5fa;
+      color: #fff;
+    }
+    .prompt-option-label {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: #eee;
+    }
+    .prompt-option-desc {
+      font-size: 0.8rem;
+      color: #888;
+      margin-top: 4px;
+      margin-left: 28px;
+    }
+    .chat-state.waiting { background: #1e3a5f; color: #60a5fa; animation: pulse 1.5s infinite; }
   </style>
 </head>
 <body>
@@ -475,6 +654,56 @@
       </div>
       <button class="refresh-btn" @click="fetchHistory">Refresh</button>
     </div>
+
+    <!-- Chat Section -->
+    <div class="chat-section">
+      <div class="chat-header">
+        <div class="chat-title">
+          <span>Session Chat</span>
+          <span class="chat-state" :class="chatState.status">{{ chatState.status }}</span>
+        </div>
+        <span style="font-size: 0.75rem; color: #666;">{{ chatMessages.length }} messages</span>
+      </div>
+      <div class="chat-messages" ref="chatContainer">
+        <div v-if="chatMessages.length === 0 && !currentPrompt" class="chat-empty">
+          No messages yet. Send a voice command to start.
+        </div>
+        <div
+          v-for="(msg, index) in chatMessages"
+          :key="index"
+          class="chat-message"
+          :class="msg.role"
+        >
+          <div class="chat-message-role">{{ msg.role }}</div>
+          <div class="chat-message-content">{{ msg.content }}</div>
+          <div class="chat-message-time">{{ formatTime(msg.timestamp) }}</div>
+        </div>
+
+        <!-- Permission Prompt -->
+        <div v-if="currentPrompt" class="prompt-box">
+          <div v-if="currentPrompt.title" class="prompt-title">{{ currentPrompt.title }}</div>
+          <div v-if="currentPrompt.context" class="prompt-context">{{ currentPrompt.context }}</div>
+          <div class="prompt-question">{{ currentPrompt.question }}</div>
+          <div class="prompt-options">
+            <div
+              v-for="opt in currentPrompt.options"
+              :key="opt.num"
+              class="prompt-option"
+              :class="{ selected: opt.selected }"
+              @click="respondToPrompt(opt.num)"
+            >
+              <div class="prompt-option-header">
+                <span class="prompt-option-num">{{ opt.num }}</span>
+                <span class="prompt-option-label">{{ opt.label }}</span>
+              </div>
+              <div v-if="opt.description" class="prompt-option-desc">{{ opt.description }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Request History</div>
 
     <div class="history-list" v-if="history.length > 0">
       <div
@@ -796,6 +1025,10 @@
           visible: false,
           form: { model: '', language: '', smart_format: true, punctuate: true, response_mode: 'text' }
         })
+        const chatMessages = ref([])
+        const chatState = ref({ status: 'idle' })
+        const chatContainer = ref(null)
+        const currentPrompt = ref(null)
         let intervalId = null
 
         const stats = computed(() => ({
@@ -824,6 +1057,48 @@
             configOptions.value = data.options
           } catch (e) {
             console.error('Failed to fetch config:', e)
+          }
+        }
+
+        const fetchChat = async () => {
+          try {
+            const res = await fetch('/api/chat')
+            const data = await res.json()
+            const wasAtBottom = chatContainer.value ?
+              chatContainer.value.scrollHeight - chatContainer.value.scrollTop <= chatContainer.value.clientHeight + 50 : true
+            const hadMessages = chatMessages.value.length
+            chatMessages.value = data.messages || []
+            chatState.value = data.state || { status: 'idle' }
+            currentPrompt.value = data.prompt || null
+            // Auto-scroll if new messages/prompt and was at bottom
+            if ((chatMessages.value.length > hadMessages || currentPrompt.value) && wasAtBottom && chatContainer.value) {
+              setTimeout(() => {
+                chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+              }, 50)
+            }
+          } catch (e) {
+            console.error('Failed to fetch chat:', e)
+          }
+        }
+
+        const respondToPrompt = async (optionNum) => {
+          try {
+            const res = await fetch('/api/prompt/respond', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ option: optionNum })
+            })
+            const data = await res.json()
+            if (data.status === 'ok') {
+              currentPrompt.value = null
+              // Refresh chat to get updated state
+              fetchChat()
+            } else {
+              alert('Error: ' + data.message)
+            }
+          } catch (e) {
+            console.error('Failed to respond to prompt:', e)
+            alert('Failed to send response')
           }
         }
 
@@ -926,9 +1201,13 @@
         onMounted(() => {
           fetchHistory()
           fetchConfig()
+          fetchChat()
           intervalId = setInterval(() => {
-            if (autoRefresh.value) fetchHistory()
-          }, 3000)
+            if (autoRefresh.value) {
+              fetchHistory()
+              fetchChat()
+            }
+          }, 2000)
           document.addEventListener('keydown', handleKeydown)
         })
 
@@ -946,8 +1225,14 @@
           responseConfig,
           configOptions,
           settingsModal,
+          chatMessages,
+          chatState,
+          chatContainer,
+          currentPrompt,
+          respondToPrompt,
           stats,
           fetchHistory,
+          fetchChat,
           saveSettings,
           formatTime,
           formatFullTime,

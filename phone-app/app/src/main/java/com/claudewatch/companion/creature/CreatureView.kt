@@ -32,10 +32,11 @@ class CreatureView @JvmOverloads constructor(
         get() {
             val centerX = width / 2f
             val centerY = height * 0.5f
-            val radius = minOf(width, height) * 0.35f
+            val radius = maxOf(minOf(width, height) * 0.35f, 1f)
+            val gradientRadius = maxOf(radius * 1.5f, 1f)
             return RadialGradient(
                 centerX, centerY - radius * 0.3f,
-                radius * 1.5f,
+                gradientRadius,
                 intArrayOf(
                     context.getColor(R.color.creature_orange_light),
                     context.getColor(R.color.creature_orange_dark)

@@ -13,6 +13,7 @@ class SettingsActivity : AppCompatActivity() {
         private const val PREFS_NAME = "claude_companion_prefs"
         private const val KEY_SERVER_ADDRESS = "server_address"
         private const val KEY_KIOSK_MODE = "kiosk_mode"
+        private const val KEY_AUTO_RETRY = "auto_retry"
         private const val DEFAULT_SERVER = "192.168.1.100:5567"
 
         fun getServerAddress(context: Context): String {
@@ -23,6 +24,11 @@ class SettingsActivity : AppCompatActivity() {
         fun isKioskModeEnabled(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             return prefs.getBoolean(KEY_KIOSK_MODE, false)
+        }
+
+        fun isAutoRetryEnabled(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_AUTO_RETRY, false)
         }
     }
 
@@ -42,6 +48,7 @@ class SettingsActivity : AppCompatActivity() {
         // Load current settings
         binding.serverAddressInput.setText(getServerAddress(this))
         binding.kioskModeSwitch.isChecked = isKioskModeEnabled(this)
+        binding.autoRetrySwitch.isChecked = isAutoRetryEnabled(this)
 
         // Save button
         binding.saveButton.setOnClickListener {
@@ -52,6 +59,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun saveSettings() {
         val serverAddress = binding.serverAddressInput.text.toString().trim()
         val kioskMode = binding.kioskModeSwitch.isChecked
+        val autoRetry = binding.autoRetrySwitch.isChecked
 
         if (serverAddress.isEmpty()) {
             binding.serverAddressInput.error = "Server address is required"
@@ -61,6 +69,7 @@ class SettingsActivity : AppCompatActivity() {
         prefs.edit()
             .putString(KEY_SERVER_ADDRESS, serverAddress)
             .putBoolean(KEY_KIOSK_MODE, kioskMode)
+            .putBoolean(KEY_AUTO_RETRY, autoRetry)
             .apply()
 
         Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show()

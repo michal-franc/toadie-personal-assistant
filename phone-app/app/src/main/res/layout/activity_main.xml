@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="@color/background_dark">
+
+    <LinearLayout
+        android:id="@+id/rootLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
     <!-- Header with connection status and settings -->
     <LinearLayout
@@ -71,6 +75,59 @@
         android:paddingBottom="8dp"
         tools:listitem="@layout/item_chat_claude" />
 
+    <!-- Permission Prompt -->
+    <LinearLayout
+        android:id="@+id/promptContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginBottom="8dp"
+        android:padding="16dp"
+        android:background="@drawable/bg_prompt"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/promptTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#60A5FA"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textAllCaps="true"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="8dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/promptContext"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:background="@drawable/bg_prompt_context"
+            android:padding="10dp"
+            android:layout_marginBottom="12dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/promptQuestion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
+
+        <LinearLayout
+            android:id="@+id/promptOptions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+    </LinearLayout>
+
     <!-- Input bar -->
     <LinearLayout
         android:id="@+id/inputBar"
@@ -123,4 +180,22 @@
 
     </LinearLayout>
 
-</LinearLayout>
+    </LinearLayout>
+
+    <!-- Kiosk mode exit button (top-left corner) -->
+    <ImageButton
+        android:id="@+id/kioskExitButton"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_gravity="top|start"
+        android:layout_margin="8dp"
+        android:background="@drawable/bg_kiosk_exit_button"
+        android:src="@android:drawable/ic_menu_close_clear_cancel"
+        android:contentDescription="Exit kiosk mode"
+        android:scaleType="centerInside"
+        android:padding="8dp"
+        android:alpha="0.5"
+        android:visibility="gone"
+        app:tint="@android:color/white" />
+
+</FrameLayout>

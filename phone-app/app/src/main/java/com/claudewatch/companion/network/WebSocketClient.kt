@@ -9,15 +9,38 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+enum class MessageStatus {
+    SENT,       // Successfully sent to server
+    PENDING,    // Queued, waiting to send (offline)
+    FAILED      // Failed to send, tap to retry
+}
+
 data class ChatMessage(
+    val id: String = java.util.UUID.randomUUID().toString(),
     val role: String,
     val content: String,
-    val timestamp: String
+    val timestamp: String,
+    val status: MessageStatus = MessageStatus.SENT
 )
 
 data class ClaudeState(
-    val status: String = "idle",  // idle, listening, thinking, speaking
+    val status: String = "idle",  // idle, listening, thinking, speaking, waiting
     val requestId: String? = null
+)
+
+data class PromptOption(
+    val num: Int,
+    val label: String,
+    val description: String,
+    val selected: Boolean
+)
+
+data class ClaudePrompt(
+    val question: String,
+    val options: List<PromptOption>,
+    val timestamp: String,
+    val title: String? = null,
+    val context: String? = null
 )
 
 enum class ConnectionStatus {
@@ -52,6 +75,9 @@ class WebSocketClient(
 
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages
+
+    private val _currentPrompt = MutableStateFlow<ClaudePrompt?>(null)
+    val currentPrompt: StateFlow<ClaudePrompt?> = _currentPrompt
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -152,6 +178,31 @@ class WebSocketClient(
                         ))
                     }
                     _chatMessages.value = messages
+                }
+                "prompt" -> {
+                    val promptJson = json.optJSONObject("prompt")
+                    if (promptJson != null) {
+                        val optionsArray = promptJson.optJSONArray("options") ?: JSONArray()
+                        val options = mutableListOf<PromptOption>()
+                        for (i in 0 until optionsArray.length()) {
+                            val optJson = optionsArray.getJSONObject(i)
+                            options.add(PromptOption(
+                                num = optJson.optInt("num"),
+                                label = optJson.optString("label"),
+                                description = optJson.optString("description", ""),
+                                selected = optJson.optBoolean("selected", false)
+                            ))
+                        }
+                        _currentPrompt.value = ClaudePrompt(
+                            question = promptJson.optString("question"),
+                            options = options,
+                            timestamp = promptJson.optString("timestamp"),
+                            title = if (promptJson.has("title")) promptJson.optString("title") else null,
+                            context = if (promptJson.has("context")) promptJson.optString("context") else null
+                        )
+                    } else {
+                        _currentPrompt.value = null
+                    }
                 }
             }
         } catch (e: Exception) {

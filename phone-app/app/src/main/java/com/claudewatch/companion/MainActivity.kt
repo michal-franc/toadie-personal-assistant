@@ -20,10 +20,18 @@ import com.claudewatch.companion.chat.ChatAdapter
 import com.claudewatch.companion.creature.CreatureState
 import com.claudewatch.companion.databinding.ActivityMainBinding
 import com.claudewatch.companion.kiosk.KioskManager
+import com.claudewatch.companion.network.ChatMessage
+import com.claudewatch.companion.network.ClaudePrompt
 import com.claudewatch.companion.network.ConnectionStatus
+import com.claudewatch.companion.network.MessageStatus
 import com.claudewatch.companion.network.WebSocketClient
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.graphics.Typeface
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -33,6 +41,9 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -47,6 +58,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var kioskManager: KioskManager
     private var webSocketClient: WebSocketClient? = null
     private var idleTimeout: Long = 0
+
+    // Pending messages queue (messages waiting to be sent)
+    private val pendingMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
 
     // Voice recording
     private var mediaRecorder: MediaRecorder? = null
@@ -73,16 +87,15 @@ class MainActivity : AppCompatActivity() {
 
         // Enter kiosk mode if enabled in settings
         if (SettingsActivity.isKioskModeEnabled(this)) {
-            kioskManager.enterKioskMode {
-                binding.header.visibility = View.VISIBLE
-                binding.inputBar.visibility = View.VISIBLE
-            }
-            binding.header.visibility = View.GONE
+            enterKioskMode()
         }
     }
 
     private fun setupChatRecyclerView() {
-        chatAdapter = ChatAdapter()
+        chatAdapter = ChatAdapter { message ->
+            // Retry sending failed/pending message
+            retryMessage(message)
+        }
         binding.chatRecyclerView.apply {
             layoutManager = LinearLayoutManager(this@MainActivity).apply {
                 stackFromEnd = true
@@ -95,6 +108,27 @@ class MainActivity : AppCompatActivity() {
         binding.settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+
+        binding.kioskExitButton.setOnClickListener {
+            exitKioskMode()
+        }
+    }
+
+    private fun enterKioskMode() {
+        kioskManager.enterKioskMode {
+            binding.header.visibility = View.VISIBLE
+            binding.inputBar.visibility = View.VISIBLE
+            binding.kioskExitButton.visibility = View.GONE
+        }
+        binding.header.visibility = View.GONE
+        binding.kioskExitButton.visibility = View.VISIBLE
+    }
+
+    private fun exitKioskMode() {
+        kioskManager.exitKioskMode()
+        binding.header.visibility = View.VISIBLE
+        binding.inputBar.visibility = View.VISIBLE
+        binding.kioskExitButton.visibility = View.GONE
     }
 
     private fun setupInputHandlers() {
@@ -138,23 +172,86 @@ class MainActivity : AppCompatActivity() {
         if (text.isEmpty()) return
 
         binding.messageInput.setText("")
-        binding.sendButton.isEnabled = false
 
+        // Create a pending message
+        val message = ChatMessage(
+            role = "user",
+            content = text,
+            timestamp = getCurrentTimestamp(),
+            status = MessageStatus.PENDING
+        )
+
+        // Add to pending queue immediately (shows in UI)
+        addPendingMessage(message)
+
+        // Try to send
+        sendMessageToServer(message)
+    }
+
+    private fun addPendingMessage(message: ChatMessage) {
+        pendingMessages.value = pendingMessages.value + message
+    }
+
+    private fun updatePendingMessage(messageId: String, newStatus: MessageStatus) {
+        pendingMessages.value = pendingMessages.value.map { msg ->
+            if (msg.id == messageId) msg.copy(status = newStatus) else msg
+        }
+    }
+
+    private fun removePendingMessage(messageId: String) {
+        pendingMessages.value = pendingMessages.value.filter { it.id != messageId }
+    }
+
+    private fun retryMessage(message: ChatMessage) {
+        if (message.status == MessageStatus.PENDING || message.status == MessageStatus.FAILED) {
+            // Update status to pending
+            updatePendingMessage(message.id, MessageStatus.PENDING)
+            // Retry sending
+            sendMessageToServer(message)
+        }
+    }
+
+    private fun sendMessageToServer(message: ChatMessage) {
         lifecycleScope.launch {
+            val isConnected = webSocketClient?.connectionStatus?.value == ConnectionStatus.CONNECTED
+
+            if (!isConnected) {
+                // Mark as failed immediately if offline
+                updatePendingMessage(message.id, MessageStatus.FAILED)
+                return@launch
+            }
+
             try {
                 val result = withContext(Dispatchers.IO) {
-                    sendTextToServer(text)
+                    sendTextToServer(message.content)
                 }
-                if (!result) {
-                    Toast.makeText(this@MainActivity, "Failed to send message", Toast.LENGTH_SHORT).show()
+                if (result) {
+                    // Success - remove from pending (server will broadcast it back)
+                    removePendingMessage(message.id)
+                } else {
+                    // Failed
+                    updatePendingMessage(message.id, MessageStatus.FAILED)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending message", e)
-                Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-            } finally {
-                binding.sendButton.isEnabled = true
+                updatePendingMessage(message.id, MessageStatus.FAILED)
             }
         }
+    }
+
+    private fun retryAllPendingMessages() {
+        val messages = pendingMessages.value.filter {
+            it.status == MessageStatus.FAILED || it.status == MessageStatus.PENDING
+        }
+        messages.forEach { message ->
+            updatePendingMessage(message.id, MessageStatus.PENDING)
+            sendMessageToServer(message)
+        }
+    }
+
+    private fun getCurrentTimestamp(): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+        return sdf.format(Date())
     }
 
     private fun sendTextToServer(text: String): Boolean {
@@ -293,6 +390,11 @@ class MainActivity : AppCompatActivity() {
             webSocketClient?.connectionStatus?.collectLatest { status ->
                 updateConnectionUI(status)
                 updateCreatureForConnection(status)
+
+                // Retry pending messages when reconnected (if enabled)
+                if (status == ConnectionStatus.CONNECTED && SettingsActivity.isAutoRetryEnabled(this@MainActivity)) {
+                    retryAllPendingMessages()
+                }
             }
         }
 
@@ -303,16 +405,130 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Combine server messages with pending messages
         lifecycleScope.launch {
-            webSocketClient?.chatMessages?.collectLatest { messages ->
-                chatAdapter.submitList(messages.toList())
-                if (messages.isNotEmpty()) {
-                    binding.chatRecyclerView.smoothScrollToPosition(messages.size - 1)
+            combine(
+                webSocketClient?.chatMessages ?: MutableStateFlow(emptyList()),
+                pendingMessages
+            ) { serverMessages, pending ->
+                // Merge: server messages + pending messages (sorted by timestamp)
+                (serverMessages + pending).sortedBy { it.timestamp }
+            }.collectLatest { allMessages ->
+                chatAdapter.submitList(allMessages.toList())
+                if (allMessages.isNotEmpty()) {
+                    binding.chatRecyclerView.smoothScrollToPosition(allMessages.size - 1)
                 }
             }
         }
 
+        // Collect prompt state
+        lifecycleScope.launch {
+            webSocketClient?.currentPrompt?.collectLatest { prompt ->
+                updatePromptUI(prompt)
+            }
+        }
+
         webSocketClient?.connect()
+    }
+
+    private fun updatePromptUI(prompt: ClaudePrompt?) {
+        if (prompt == null) {
+            binding.promptContainer.visibility = View.GONE
+            return
+        }
+
+        binding.promptContainer.visibility = View.VISIBLE
+
+        // Show title if present
+        if (!prompt.title.isNullOrEmpty()) {
+            binding.promptTitle.text = prompt.title
+            binding.promptTitle.visibility = View.VISIBLE
+        } else {
+            binding.promptTitle.visibility = View.GONE
+        }
+
+        // Show context if present (e.g., bash command)
+        if (!prompt.context.isNullOrEmpty()) {
+            binding.promptContext.text = prompt.context
+            binding.promptContext.visibility = View.VISIBLE
+        } else {
+            binding.promptContext.visibility = View.GONE
+        }
+
+        binding.promptQuestion.text = prompt.question
+
+        // Clear existing options
+        binding.promptOptions.removeAllViews()
+
+        // Add option buttons
+        for (option in prompt.options) {
+            val optionView = layoutInflater.inflate(R.layout.item_prompt_option, binding.promptOptions, false)
+
+            val numText = optionView.findViewById<TextView>(R.id.optionNum)
+            val labelText = optionView.findViewById<TextView>(R.id.optionLabel)
+            val descText = optionView.findViewById<TextView>(R.id.optionDescription)
+
+            numText.text = option.num.toString()
+            labelText.text = option.label
+            if (option.description.isNotEmpty()) {
+                descText.text = option.description
+                descText.visibility = View.VISIBLE
+            } else {
+                descText.visibility = View.GONE
+            }
+
+            if (option.selected) {
+                optionView.isSelected = true
+            }
+
+            optionView.setOnClickListener {
+                respondToPrompt(option.num)
+            }
+
+            binding.promptOptions.addView(optionView)
+        }
+
+        // Scroll chat to bottom to show prompt
+        binding.chatRecyclerView.post {
+            val itemCount = chatAdapter.itemCount
+            if (itemCount > 0) {
+                binding.chatRecyclerView.smoothScrollToPosition(itemCount - 1)
+            }
+        }
+    }
+
+    private fun respondToPrompt(optionNum: Int) {
+        lifecycleScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val serverAddress = SettingsActivity.getServerAddress(this@MainActivity)
+                    val baseUrl = "http://${serverAddress.replace(":5567", ":5566")}"
+                    val url = "$baseUrl/api/prompt/respond"
+
+                    val json = JSONObject().apply {
+                        put("option", optionNum)
+                    }
+
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(json.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    response.isSuccessful
+                }
+
+                if (result) {
+                    // Hide prompt (server will send update via WebSocket)
+                    binding.promptContainer.visibility = View.GONE
+                } else {
+                    Toast.makeText(this@MainActivity, "Failed to send response", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error responding to prompt", e)
+                Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun updateConnectionUI(status: ConnectionStatus) {
@@ -381,11 +597,7 @@ class MainActivity : AppCompatActivity() {
         } ?: connectWebSocket()
 
         if (SettingsActivity.isKioskModeEnabled(this) && !kioskManager.isInKioskMode()) {
-            kioskManager.enterKioskMode {
-                binding.header.visibility = View.VISIBLE
-                binding.inputBar.visibility = View.VISIBLE
-            }
-            binding.header.visibility = View.GONE
+            enterKioskMode()
         }
     }
 
