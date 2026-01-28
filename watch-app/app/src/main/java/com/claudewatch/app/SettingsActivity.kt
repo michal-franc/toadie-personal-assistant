@@ -23,6 +23,19 @@ class SettingsActivity : Activity() {
             val port = prefs.getString(KEY_SERVER_PORT, DEFAULT_PORT) ?: DEFAULT_PORT
             return "http://$ip:$port/transcribe"
         }
+
+        fun getWebSocketUrl(context: Context): String {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val ip = prefs.getString(KEY_SERVER_IP, DEFAULT_IP) ?: DEFAULT_IP
+            return "ws://$ip:5567/ws"
+        }
+
+        fun getBaseUrl(context: Context): String {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val ip = prefs.getString(KEY_SERVER_IP, DEFAULT_IP) ?: DEFAULT_IP
+            val port = prefs.getString(KEY_SERVER_PORT, DEFAULT_PORT) ?: DEFAULT_PORT
+            return "http://$ip:$port"
+        }
     }
 
     private lateinit var ipEditText: EditText

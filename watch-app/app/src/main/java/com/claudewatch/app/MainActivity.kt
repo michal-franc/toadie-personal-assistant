@@ -32,6 +32,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class MainActivity : Activity() {
 
@@ -43,6 +44,7 @@ class MainActivity : Activity() {
         private const val NOTIFICATION_ID = 1
         private const val POLL_INTERVAL_MS = 5000L  // 5 seconds
         private const val MAX_POLL_ATTEMPTS = 24     // 2 minutes max
+        private const val WS_RECONNECT_DELAY_MS = 5000L
     }
 
     // UI elements
@@ -56,6 +58,13 @@ class MainActivity : Activity() {
     private lateinit var statusText: TextView
     private lateinit var progressBar: ProgressBar
 
+    // Permission prompt UI
+    private lateinit var permissionPrompt: LinearLayout
+    private lateinit var permissionTitle: TextView
+    private lateinit var permissionQuestion: TextView
+    private lateinit var allowButton: Button
+    private lateinit var denyButton: Button
+
     // State
     private var mediaRecorder: MediaRecorder? = null
     private var mediaPlayer: MediaPlayer? = null
@@ -68,11 +77,21 @@ class MainActivity : Activity() {
     private var pollingJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
+    // WebSocket state
+    private var webSocket: WebSocket? = null
+    private var wsReconnectJob: Job? = null
+    private var currentPermissionRequestId: String? = null
+
     private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    private val wsClient = OkHttpClient.Builder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(30, TimeUnit.SECONDS)
         .build()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,6 +109,13 @@ class MainActivity : Activity() {
         statusText = findViewById(R.id.statusText)
         progressBar = findViewById(R.id.progressBar)
 
+        // Permission prompt UI
+        permissionPrompt = findViewById(R.id.permissionPrompt)
+        permissionTitle = findViewById(R.id.permissionTitle)
+        permissionQuestion = findViewById(R.id.permissionQuestion)
+        allowButton = findViewById(R.id.allowButton)
+        denyButton = findViewById(R.id.denyButton)
+
         // Set up click listeners
         recordButton.setOnClickListener { onRecordButtonClick() }
         abortButton.setOnClickListener { onAbortClick() }
@@ -99,9 +125,14 @@ class MainActivity : Activity() {
         settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        allowButton.setOnClickListener { respondToPermission("allow") }
+        denyButton.setOnClickListener { respondToPermission("deny") }
 
         createNotificationChannel()
         requestNotificationPermission()
+
+        // Connect to WebSocket for permission prompts
+        connectWebSocket()
 
         // Auto-start recording on launch (only if not waiting)
         autoStartRecording()
@@ -180,6 +211,8 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         pollingJob?.cancel()
+        wsReconnectJob?.cancel()
+        webSocket?.close(1000, "Activity destroyed")
         coroutineScope.cancel()
         releaseWakeLock()
         stopRecording()
@@ -187,6 +220,130 @@ class MainActivity : Activity() {
         mediaPlayer = null
         currentAudioFile?.delete()
         httpClient.dispatcher.executorService.shutdown()
+        wsClient.dispatcher.executorService.shutdown()
+    }
+
+    // WebSocket connection for permission prompts
+    private fun connectWebSocket() {
+        val wsUrl = SettingsActivity.getWebSocketUrl(this)
+        Log.d(TAG, "Connecting WebSocket to $wsUrl")
+
+        val request = Request.Builder()
+            .url(wsUrl)
+            .build()
+
+        webSocket = wsClient.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                Log.i(TAG, "WebSocket connected")
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                Log.d(TAG, "WebSocket message: $text")
+                handleWebSocketMessage(text)
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                Log.i(TAG, "WebSocket closing: $code $reason")
+                webSocket.close(1000, null)
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.i(TAG, "WebSocket closed: $code $reason")
+                scheduleReconnect()
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.e(TAG, "WebSocket error", t)
+                scheduleReconnect()
+            }
+        })
+    }
+
+    private fun scheduleReconnect() {
+        wsReconnectJob?.cancel()
+        wsReconnectJob = coroutineScope.launch {
+            delay(WS_RECONNECT_DELAY_MS)
+            connectWebSocket()
+        }
+    }
+
+    private fun handleWebSocketMessage(text: String) {
+        try {
+            val json = JSONObject(text)
+            when (json.optString("type")) {
+                "permission" -> {
+                    val requestId = json.optString("request_id", "")
+                    val toolName = json.optString("tool_name", "")
+                    val question = json.optString("question", "Allow action?")
+
+                    if (requestId.isNotEmpty()) {
+                        currentPermissionRequestId = requestId
+                        runOnUiThread {
+                            showPermissionPrompt(toolName, question)
+                        }
+                    }
+                }
+                "permission_resolved" -> {
+                    val resolvedId = json.optString("request_id", "")
+                    if (resolvedId == currentPermissionRequestId) {
+                        currentPermissionRequestId = null
+                        runOnUiThread {
+                            hidePermissionPrompt()
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing WebSocket message", e)
+        }
+    }
+
+    private fun showPermissionPrompt(toolName: String, question: String) {
+        permissionTitle.text = toolName.ifEmpty { "Permission" }
+        permissionQuestion.text = question
+        permissionPrompt.visibility = View.VISIBLE
+        vibrate(longArrayOf(0, 100, 50, 100))
+    }
+
+    private fun hidePermissionPrompt() {
+        permissionPrompt.visibility = View.GONE
+    }
+
+    private fun respondToPermission(decision: String) {
+        val requestId = currentPermissionRequestId ?: return
+
+        hidePermissionPrompt()
+        vibrate(50)
+
+        coroutineScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val baseUrl = SettingsActivity.getBaseUrl(this@MainActivity)
+                    val url = "$baseUrl/api/permission/respond"
+
+                    val jsonBody = JSONObject().apply {
+                        put("request_id", requestId)
+                        put("decision", decision)
+                    }
+
+                    val requestBody = jsonBody.toString()
+                        .toByteArray()
+                        .toRequestBody("application/json".toMediaType())
+
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(requestBody)
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    Log.d(TAG, "Permission response sent: ${response.code}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending permission response", e)
+            }
+        }
+
+        currentPermissionRequestId = null
     }
 
     private fun onRecordButtonClick() {
