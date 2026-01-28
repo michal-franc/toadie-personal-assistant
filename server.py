@@ -1025,7 +1025,25 @@ class DictationHandler(BaseHTTPRequestHandler):
                 question = f"Execute {tool_name}"
                 context = json.dumps(tool_input)[:200]
 
-            # Broadcast to mobile app
+            # Build prompt data
+            prompt_data = {
+                'question': question,
+                'options': [
+                    {'num': 1, 'label': 'Allow', 'description': 'Permit this operation'},
+                    {'num': 2, 'label': 'Deny', 'description': 'Block this operation'},
+                ],
+                'timestamp': datetime.now().isoformat(),
+                'title': tool_name,
+                'context': context,
+                'request_id': request_id,
+                'tool_name': tool_name,
+                'isPermission': True
+            }
+
+            # Set current_prompt so polling clients (dashboard) see it
+            set_current_prompt(prompt_data)
+
+            # Also broadcast as permission type for WebSocket clients
             broadcast_message({
                 'type': 'permission',
                 'request_id': request_id,
@@ -1112,6 +1130,10 @@ class DictationHandler(BaseHTTPRequestHandler):
             pending_permissions[request_id]['reason'] = reason
 
             logger.info(f"[PERMISSION] Response {request_id}: {decision}")
+
+            # Clear current_prompt if it matches this permission
+            if current_prompt and current_prompt.get('request_id') == request_id:
+                set_current_prompt(None)
 
             # Broadcast resolution
             broadcast_message({

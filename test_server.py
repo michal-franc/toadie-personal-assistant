@@ -376,11 +376,17 @@ class TestPermissionEndpoints:
         assert server.pending_permissions[request_id]['tool_name'] == 'Bash'
         assert server.pending_permissions[request_id]['status'] == 'pending'
 
-        # Check broadcast
-        mock_broadcast.assert_called_once()
-        broadcast_data = mock_broadcast.call_args[0][0]
-        assert broadcast_data['type'] == 'permission'
-        assert broadcast_data['request_id'] == request_id
+        # Check broadcasts (prompt + permission)
+        assert mock_broadcast.call_count == 2
+        # First call is for set_current_prompt (type: prompt)
+        prompt_call = mock_broadcast.call_args_list[0][0][0]
+        assert prompt_call['type'] == 'prompt'
+        assert prompt_call['prompt']['isPermission'] == True
+        assert prompt_call['prompt']['request_id'] == request_id
+        # Second call is for permission broadcast
+        permission_call = mock_broadcast.call_args_list[1][0][0]
+        assert permission_call['type'] == 'permission'
+        assert permission_call['request_id'] == request_id
 
     @patch.object(server.DictationHandler, '__init__', lambda x, *args: None)
     def test_permission_status_pending(self):

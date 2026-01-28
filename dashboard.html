@@ -1083,18 +1083,36 @@
 
         const respondToPrompt = async (optionNum) => {
           try {
-            const res = await fetch('/api/prompt/respond', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ option: optionNum })
-            })
+            const prompt = currentPrompt.value
+            let res
+
+            if (prompt && prompt.isPermission && prompt.request_id) {
+              // Permission request - use permission endpoint
+              const decision = optionNum === 1 ? 'allow' : 'deny'
+              res = await fetch('/api/permission/respond', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  request_id: prompt.request_id,
+                  decision: decision
+                })
+              })
+            } else {
+              // Regular prompt - use prompt endpoint
+              res = await fetch('/api/prompt/respond', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ option: optionNum })
+              })
+            }
+
             const data = await res.json()
             if (data.status === 'ok') {
               currentPrompt.value = null
               // Refresh chat to get updated state
               fetchChat()
             } else {
-              alert('Error: ' + data.message)
+              alert('Error: ' + (data.message || 'Unknown error'))
             }
           } catch (e) {
             console.error('Failed to respond to prompt:', e)
