@@ -1,12 +1,14 @@
 # Claude Companion
 
-Android phone app with a Tamagotchi-style Claude creature and real-time chat view. Connects to the Claude Watch server via WebSocket for live updates.
+Android phone app with a Tamagotchi-style Claude creature, real-time chat, and permission prompt handling. Connects to the Claude Watch server via WebSocket for live updates.
 
 ![Mockup](../docs/phone-mockups/companion-app.svg)
 
 ## Features
 
-- **Animated Creature** - Tamagotchi-style blob that reacts to Claude's state
+### Animated Creature
+
+Tamagotchi-style blob that reacts to Claude's state.
 
 ![Creature States](../docs/phone-mockups/creature-states.svg)
 
@@ -19,14 +21,33 @@ Android phone app with a Tamagotchi-style Claude creature and real-time chat vie
 | Sleeping | 2+ min idle | Zzz particles, closed eyes |
 | Offline | Disconnected | Sad expression, gray color |
 
-- **Real-time Chat** - Messages appear instantly via WebSocket
-  - User messages: Blue bubbles (right-aligned)
-  - Claude messages: Orange bubbles (left-aligned)
-  - Auto-scroll to newest message
+### Real-time Chat
 
-- **Text Input** - Type messages to send to Claude
+- Messages appear instantly via WebSocket
+- User messages: Blue bubbles (right-aligned)
+- Claude messages: Orange bubbles (left-aligned)
+- Auto-scroll to newest message
+- Pending/failed message status indicators
+- Retry failed messages on tap
+
+### Input Methods
+
+- **Text Input** - Type messages with keyboard
 - **Voice Input** - Hold mic button to record, release to send
-- **Kiosk Mode** - Fullscreen immersive mode (triple-tap top-left to exit)
+
+### Permission Prompts
+
+When Claude needs approval for sensitive operations:
+- Displays tool name and context
+- Shows Allow/Deny options
+- Sends decision to server
+- Clears on resolution
+
+### Kiosk Mode
+
+Fullscreen immersive display mode:
+- Hides status bar and navigation
+- Triple-tap top-left corner to exit
 
 ## Requirements
 
@@ -37,6 +58,7 @@ Android phone app with a Tamagotchi-style Claude creature and real-time chat vie
 
 1. Build the app:
    ```bash
+   cd phone-app
    ./gradlew assembleDebug
    ```
 
@@ -47,25 +69,43 @@ Android phone app with a Tamagotchi-style Claude creature and real-time chat vie
 
 3. Configure server address in Settings:
    - Tap the gear icon
-   - Enter your server's IP and WebSocket port (e.g., `192.168.1.100:5567`)
+   - Enter server IP and WebSocket port (e.g., `192.168.1.100:5567`)
+   - Toggle Kiosk mode if desired
    - Tap Save
 
-## Server Requirements
+## Server Connection
 
-The Claude Watch server must be running with WebSocket support:
+The app connects via WebSocket for real-time updates:
 
 ```bash
-# Start server (includes WebSocket on port 5567)
+# Server must be running
 ./server.py /path/to/project
 ```
 
-### Server Endpoints Used
+### Endpoints Used
 
 | Endpoint | Port | Description |
 |----------|------|-------------|
-| `ws://server:5567/ws` | 5567 | WebSocket for state & chat updates |
+| `ws://server:5567/ws` | 5567 | WebSocket for state & chat |
 | `POST /api/message` | 5566 | Send text messages |
 | `POST /transcribe` | 5566 | Send audio recordings |
+| `POST /api/permission/respond` | 5566 | Submit permission decision |
+
+### WebSocket Messages
+
+**Received:**
+| Type | Description |
+|------|-------------|
+| `state` | Claude status updates |
+| `chat` | New chat message |
+| `history` | Full chat history on connect |
+| `permission` | Permission request |
+| `permission_resolved` | Permission decision made |
+| `usage` | Context usage stats |
+
+**Connection:**
+- Auto-reconnect on disconnect (5s delay)
+- Ping/pong keepalive (30s interval)
 
 ## Project Structure
 
@@ -92,8 +132,22 @@ phone-app/
 │   └── values/
 │       ├── colors.xml            # App color palette
 │       └── themes.xml            # Dark theme
-└── build.gradle.kts              # Dependencies
+├── app/src/test/                  # Unit tests
+└── build.gradle.kts
 ```
+
+## Testing
+
+```bash
+# Run unit tests
+./gradlew test
+```
+
+Tests cover:
+- WebSocket message parsing
+- ChatAdapter DiffUtil callback
+- KioskManager tap detection
+- CreatureState mapping
 
 ## Dependencies
 
@@ -113,7 +167,3 @@ phone-app/
 | Claude bubble | `#F59E0B` |
 | Connected | `#4CAF50` |
 | Disconnected | `#F44336` |
-
-## License
-
-Part of the Claude Watch project.
