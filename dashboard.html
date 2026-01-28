@@ -106,6 +106,16 @@
       font-weight: 600;
       color: #888;
     }
+    .input-type-badge {
+      font-size: 0.9rem;
+      margin-left: 6px;
+    }
+    .input-type-badge.voice {
+      color: #60a5fa;
+    }
+    .input-type-badge.text {
+      color: #a78bfa;
+    }
     .history-time {
       font-size: 0.8rem;
       color: #666;
@@ -714,6 +724,9 @@
       >
         <div class="history-header">
           <span class="history-id">#{{ item.id }}</span>
+          <span class="input-type-badge" :class="item.input_type || 'voice'">
+            {{ (item.input_type || 'voice') === 'voice' ? '🎤' : '💬' }}
+          </span>
           <div>
             <span class="history-time">{{ formatTime(item.timestamp) }}</span>
             <span class="history-duration" v-if="getTotalDuration(item)">{{ getTotalDuration(item) }}</span>
@@ -755,7 +768,7 @@
 
     <div class="empty-state" v-else>
       <p>No requests yet</p>
-      <p style="margin-top: 8px; font-size: 0.9rem;">Send audio to /transcribe to see history here</p>
+      <p style="margin-top: 8px; font-size: 0.9rem;">Send audio to /transcribe or text to /api/message</p>
     </div>
 
     <!-- Step Details Modal -->

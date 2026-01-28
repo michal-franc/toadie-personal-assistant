@@ -578,6 +578,7 @@ class DictationHandler(BaseHTTPRequestHandler):
             'id': len(request_history) + 1,
             'request_id': request_id,
             'timestamp': received_at.isoformat(),
+            'input_type': 'voice',
             'content_type': content_type,
             'size_bytes': content_length,
             'transcript': None,
@@ -928,10 +929,52 @@ class DictationHandler(BaseHTTPRequestHandler):
                 return
 
             request_id = str(uuid.uuid4())[:8]
+            received_at = datetime.now()
             print(f"[TEXT] Received message: {text[:50]}...")
+
+            # Add to history
+            entry = {
+                'id': len(request_history) + 1,
+                'request_id': request_id,
+                'timestamp': received_at.isoformat(),
+                'input_type': 'text',
+                'content_type': 'text/plain',
+                'size_bytes': len(text.encode()),
+                'transcript': text,
+                'claude_launched': False,
+                'status': 'processing',
+                'error': None,
+                'steps': [
+                    {
+                        'name': 'received',
+                        'label': 'Received',
+                        'status': 'completed',
+                        'timestamp': received_at.isoformat(),
+                        'details': f'Text message: {len(text)} chars'
+                    }
+                ]
+            }
 
             # Launch Claude with the text
             launched = run_claude(text, request_id)
+            entry['claude_launched'] = launched
+
+            if launched:
+                entry['status'] = 'completed'
+                entry['steps'].append({
+                    'name': 'claude',
+                    'label': 'Claude',
+                    'status': 'completed',
+                    'timestamp': datetime.now().isoformat(),
+                    'details': 'Command sent to Claude'
+                })
+            else:
+                entry['status'] = 'error'
+                entry['error'] = 'Failed to launch Claude'
+
+            request_history.insert(0, entry)
+            if len(request_history) > MAX_HISTORY:
+                request_history.pop()
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
