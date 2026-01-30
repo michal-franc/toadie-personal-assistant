@@ -9,86 +9,75 @@
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:boxedEdges="all">
+        android:layout_height="match_parent">
 
-        <!-- Connection bar at top -->
-        <LinearLayout
-            android:id="@+id/connectionBar"
+        <!-- Connection status bar at top -->
+        <View
+            android:id="@+id/connectionDot"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="4dp"
             android:layout_gravity="top"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp">
+            android:background="@android:color/holo_red_light" />
 
-            <View
-                android:id="@+id/connectionDot"
-                android:layout_width="8dp"
-                android:layout_height="8dp"
-                android:background="@android:color/holo_red_light" />
+        <!-- Hidden text view kept for code compatibility -->
+        <TextView
+            android:id="@+id/connectionText"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
 
-            <TextView
-                android:id="@+id/connectionText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Disconnected"
-                android:textColor="@android:color/darker_gray"
-                android:textSize="10sp"
-                android:layout_marginStart="4dp" />
-
-            <ImageButton
-                android:id="@+id/settingsButton"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_settings"
-                android:contentDescription="Settings"
-                android:tint="@android:color/darker_gray"
-                android:scaleType="fitCenter"
-                android:padding="4dp" />
-
-        </LinearLayout>
+        <ImageButton
+            android:id="@+id/settingsButton"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="6dp"
+            android:layout_marginEnd="2dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_settings"
+            android:contentDescription="Settings"
+            android:tint="@android:color/darker_gray"
+            android:scaleType="fitCenter"
+            android:padding="2dp" />
 
         <!-- Chat RecyclerView in middle -->
         <androidx.wear.widget.WearableRecyclerView
             android:id="@+id/chatRecyclerView"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginTop="28dp"
-            android:layout_marginBottom="80dp"
+            android:layout_marginTop="8dp"
+            android:clipChildren="false"
             android:clipToPadding="false"
             android:paddingTop="4dp"
-            android:paddingBottom="4dp" />
+            android:paddingBottom="48dp" />
 
         <!-- Record button at bottom center -->
-        <Button
+        <TextView
             android:id="@+id/recordButton"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:layout_gravity="bottom|center_horizontal"
-            android:text="Record"
-            android:textSize="12sp"
+            android:text="Rec"
+            android:textSize="10sp"
             android:textColor="@android:color/white"
             android:background="@drawable/round_button"
-            android:stateListAnimator="@null" />
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true" />
 
         <!-- Abort button at bottom center (hidden) -->
-        <Button
+        <TextView
             android:id="@+id/abortButton"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:layout_gravity="bottom|center_horizontal"
-            android:text="Abort"
-            android:textSize="12sp"
+            android:text="Stop"
+            android:textSize="10sp"
             android:textColor="@android:color/white"
-            android:background="@drawable/round_button"
-            android:backgroundTint="@android:color/holo_orange_dark"
-            android:stateListAnimator="@null"
+            android:background="@drawable/round_button_orange"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
             android:visibility="gone" />
 
         <!-- Audio playback controls at bottom (hidden) -->
@@ -101,53 +90,80 @@
             android:gravity="center"
             android:visibility="gone">
 
-            <Button
+            <TextView
                 android:id="@+id/replayButton"
-                android:layout_width="60dp"
-                android:layout_height="60dp"
-                android:text="Replay"
-                android:textSize="10sp"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:text="Re"
+                android:textSize="9sp"
                 android:textColor="@android:color/white"
-                android:background="@drawable/round_button"
-                android:backgroundTint="@android:color/holo_green_dark"
-                android:stateListAnimator="@null"
+                android:background="@drawable/round_button_green"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
                 android:layout_marginEnd="8dp" />
 
-            <Button
+            <TextView
                 android:id="@+id/pauseButton"
-                android:layout_width="60dp"
-                android:layout_height="60dp"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
                 android:text="Pause"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:textColor="@android:color/white"
                 android:background="@drawable/round_button"
-                android:backgroundTint="@android:color/holo_blue_dark"
-                android:stateListAnimator="@null" />
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true" />
 
         </LinearLayout>
 
         <!-- Done button at bottom (hidden) -->
-        <Button
+        <TextView
             android:id="@+id/doneButton"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:layout_gravity="bottom|center_horizontal"
             android:text="Done"
-            android:textSize="12sp"
+            android:textSize="10sp"
             android:textColor="@android:color/white"
-            android:background="@drawable/round_button"
-            android:backgroundTint="@android:color/holo_green_dark"
-            android:stateListAnimator="@null"
+            android:background="@drawable/round_button_green"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
             android:visibility="gone" />
 
-        <!-- Progress bar (hidden) -->
-        <ProgressBar
-            android:id="@+id/progressBar"
+        <!-- State indicator (RECORDING, THINKING, etc.) - overlays chat -->
+        <TextView
+            android:id="@+id/stateIndicator"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:visibility="gone"
-            android:indeterminateTint="@android:color/holo_blue_light" />
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="6dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:textSize="10sp"
+            android:textColor="@android:color/white"
+            android:textStyle="bold"
+            android:elevation="4dp"
+            android:visibility="gone" />
+
+        <!-- Thinking overlay (full-screen, hidden) -->
+        <FrameLayout
+            android:id="@+id/thinkingOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#73000000"
+            android:visibility="gone">
+
+            <ProgressBar
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="center"
+                android:indeterminateTint="@android:color/holo_blue_light" />
+
+        </FrameLayout>
 
         <!-- Prompt overlay (full-screen, hidden) -->
         <LinearLayout

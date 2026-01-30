@@ -4,8 +4,8 @@
     android:layout_height="wrap_content"
     android:paddingStart="24dp"
     android:paddingEnd="4dp"
-    android:paddingTop="2dp"
-    android:paddingBottom="2dp">
+    android:clipChildren="false"
+    android:clipToPadding="false">
 
     <TextView
         android:id="@+id/messageText"
@@ -15,6 +15,7 @@
         android:background="@drawable/bg_watch_chat_user"
         android:textColor="@android:color/white"
         android:textSize="12sp"
-        android:maxWidth="140dp" />
+        android:maxWidth="140dp"
+        android:elevation="2dp" />
 
 </FrameLayout>

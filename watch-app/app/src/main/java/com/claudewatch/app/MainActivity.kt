@@ -14,9 +14,9 @@ import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.app.Activity
@@ -46,18 +46,21 @@ class MainActivity : Activity() {
     }
 
     // UI elements
-    private lateinit var recordButton: Button
-    private lateinit var abortButton: Button
+    private lateinit var recordButton: TextView
+    private lateinit var abortButton: TextView
     private lateinit var audioControls: LinearLayout
-    private lateinit var replayButton: Button
-    private lateinit var pauseButton: Button
-    private lateinit var doneButton: Button
+    private lateinit var replayButton: TextView
+    private lateinit var pauseButton: TextView
+    private lateinit var doneButton: TextView
     private lateinit var settingsButton: ImageButton
-    private lateinit var progressBar: ProgressBar
+    private lateinit var thinkingOverlay: FrameLayout
 
     // Connection bar
     private lateinit var connectionDot: View
     private lateinit var connectionText: TextView
+
+    // State indicator
+    private lateinit var stateIndicator: TextView
 
     // Chat
     private lateinit var chatRecyclerView: WearableRecyclerView
@@ -108,10 +111,11 @@ class MainActivity : Activity() {
         pauseButton = findViewById(R.id.pauseButton)
         doneButton = findViewById(R.id.doneButton)
         settingsButton = findViewById(R.id.settingsButton)
-        progressBar = findViewById(R.id.progressBar)
+        thinkingOverlay = findViewById(R.id.thinkingOverlay)
 
         connectionDot = findViewById(R.id.connectionDot)
         connectionText = findViewById(R.id.connectionText)
+        stateIndicator = findViewById(R.id.stateIndicator)
 
         chatRecyclerView = findViewById(R.id.chatRecyclerView)
 
@@ -126,10 +130,13 @@ class MainActivity : Activity() {
         chatAdapter = WatchChatAdapter()
         chatRecyclerView.apply {
             isEdgeItemsCenteringEnabled = false
+            clipChildren = false
+            clipToPadding = false
             layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@MainActivity).apply {
                 stackFromEnd = true
             }
             adapter = chatAdapter
+            addItemDecoration(WatchChatAdapter.OverlapDecoration())
         }
     }
 
@@ -170,9 +177,9 @@ class MainActivity : Activity() {
         // Chat messages
         coroutineScope.launch {
             wsClient.chatMessages.collectLatest { messages ->
-                chatAdapter.submitList(messages) {
+                chatAdapter.submitMessages(messages) {
                     if (messages.isNotEmpty()) {
-                        chatRecyclerView.smoothScrollToPosition(messages.size - 1)
+                        chatRecyclerView.smoothScrollToPosition(chatAdapter.itemCount - 1)
                     }
                 }
             }
@@ -191,36 +198,12 @@ class MainActivity : Activity() {
     }
 
     private fun updateConnectionIndicator(status: ConnectionStatus) {
-        val dotBg = connectionDot.background
-        when (status) {
-            ConnectionStatus.CONNECTED -> {
-                if (dotBg is GradientDrawable) {
-                    dotBg.setColor(ContextCompat.getColor(this, android.R.color.holo_green_light))
-                } else {
-                    connectionDot.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_green_light))
-                }
-                connectionText.text = "Connected"
-                connectionText.setTextColor(ContextCompat.getColor(this, android.R.color.holo_green_light))
-            }
-            ConnectionStatus.CONNECTING -> {
-                if (dotBg is GradientDrawable) {
-                    dotBg.setColor(ContextCompat.getColor(this, android.R.color.holo_orange_light))
-                } else {
-                    connectionDot.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_orange_light))
-                }
-                connectionText.text = "Connecting..."
-                connectionText.setTextColor(ContextCompat.getColor(this, android.R.color.holo_orange_light))
-            }
-            ConnectionStatus.DISCONNECTED -> {
-                if (dotBg is GradientDrawable) {
-                    dotBg.setColor(ContextCompat.getColor(this, android.R.color.holo_red_light))
-                } else {
-                    connectionDot.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_red_light))
-                }
-                connectionText.text = "Disconnected"
-                connectionText.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
-            }
+        val color = when (status) {
+            ConnectionStatus.CONNECTED -> android.R.color.holo_green_light
+            ConnectionStatus.CONNECTING -> android.R.color.holo_orange_light
+            ConnectionStatus.DISCONNECTED -> android.R.color.holo_red_light
         }
+        connectionDot.setBackgroundColor(ContextCompat.getColor(this, color))
     }
 
     private fun onClaudeStateChanged(state: ClaudeState) {
@@ -683,39 +666,91 @@ class MainActivity : Activity() {
     private fun updateUIState() {
         val claudeStatus = wsClient.claudeState.value.status
 
+        // Update state indicator pill
+        updateStateIndicator(claudeStatus)
+
+        // Show thinking dots in chat
+        chatAdapter.setThinking(claudeStatus == "thinking")
+        if (claudeStatus == "thinking") {
+            chatRecyclerView.smoothScrollToPosition(chatAdapter.itemCount - 1)
+        }
+
         when {
             isPlayingAudio -> {
                 animateOut(recordButton)
                 animateOut(abortButton)
                 animateIn(audioControls)
                 animateOut(doneButton)
-                fadeOut(progressBar)
             }
             isRecording -> {
                 recordButton.text = "Stop & Send"
-                recordButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
+                recordButton.setBackgroundResource(R.drawable.round_button_red)
                 animateIn(recordButton)
                 animateOut(abortButton)
                 animateOut(audioControls)
                 animateOut(doneButton)
-                fadeOut(progressBar)
             }
             claudeStatus == "thinking" -> {
                 animateOut(recordButton)
                 animateIn(abortButton)
                 animateOut(audioControls)
                 animateOut(doneButton)
-                fadeIn(progressBar)
             }
             else -> {
                 // Idle state
                 recordButton.text = "Record"
-                recordButton.setBackgroundColor(ContextCompat.getColor(this, android.R.color.holo_blue_dark))
+                recordButton.setBackgroundResource(R.drawable.round_button)
                 animateIn(recordButton)
                 animateOut(abortButton)
                 animateOut(audioControls)
                 animateOut(doneButton)
-                fadeOut(progressBar)
+            }
+        }
+    }
+
+    private fun updateStateIndicator(claudeStatus: String) {
+        val bg = GradientDrawable()
+        bg.cornerRadius = 24f
+
+        when {
+            isRecording -> {
+                stateIndicator.text = "RECORDING"
+                bg.setColor(android.graphics.Color.parseColor("#D32F2F"))
+                stateIndicator.background = bg
+                if (stateIndicator.visibility != View.VISIBLE) {
+                    stateIndicator.alpha = 0f
+                    stateIndicator.visibility = View.VISIBLE
+                    stateIndicator.animate().alpha(1f).setDuration(FADE_MS).start()
+                }
+            }
+            claudeStatus == "thinking" -> {
+                stateIndicator.text = "THINKING"
+                bg.setColor(android.graphics.Color.parseColor("#F57C00"))
+                stateIndicator.background = bg
+                if (stateIndicator.visibility != View.VISIBLE) {
+                    stateIndicator.alpha = 0f
+                    stateIndicator.visibility = View.VISIBLE
+                    stateIndicator.animate().alpha(1f).setDuration(FADE_MS).start()
+                }
+            }
+            isPlayingAudio -> {
+                stateIndicator.text = "SPEAKING"
+                bg.setColor(android.graphics.Color.parseColor("#1976D2"))
+                stateIndicator.background = bg
+                if (stateIndicator.visibility != View.VISIBLE) {
+                    stateIndicator.alpha = 0f
+                    stateIndicator.visibility = View.VISIBLE
+                    stateIndicator.animate().alpha(1f).setDuration(FADE_MS).start()
+                }
+            }
+            else -> {
+                if (stateIndicator.visibility == View.VISIBLE) {
+                    stateIndicator.animate()
+                        .alpha(0f)
+                        .setDuration(FADE_MS)
+                        .withEndAction { stateIndicator.visibility = View.GONE }
+                        .start()
+                }
             }
         }
     }
@@ -810,13 +845,12 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         val claudeStatus = wsClient.claudeState.value.status
+        val isConnected = wsClient.connectionStatus.value == ConnectionStatus.CONNECTED
         when {
             isPlayingAudio -> onPauseClick()
             claudeStatus == "thinking" -> onAbortClick()
             isRecording -> stopRecordingAndSend()
-            else -> {
-                if (checkPermission()) startRecording()
-            }
+            isConnected && checkPermission() -> startRecording()
         }
     }
 

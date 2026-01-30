@@ -2,6 +2,10 @@
 
 Voice recording app for Galaxy Watch that sends audio to the claude-watch server and receives responses as text notifications or audio playback.
 
+## UI Mockup
+
+![Watch & Phone Mockup](../docs/watch-mockup.png)
+
 ## UI Flow
 
 ![Watch UI Flow](../docs/watch-mockups/00-flow-overview.svg)
