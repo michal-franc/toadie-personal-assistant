@@ -38,12 +38,14 @@ object RelayWebSocketManager {
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (webSocket !== this@RelayWebSocketManager.webSocket) return
             Log.i(TAG, "Watch-relay WebSocket connected")
             isConnected = true
             sendStatusToWatch("connected")
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            if (webSocket !== this@RelayWebSocketManager.webSocket) return
             Log.d(TAG, "Relay WS received: $text")
             forwardToWatch(text)
         }
@@ -54,6 +56,7 @@ object RelayWebSocketManager {
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (webSocket !== this@RelayWebSocketManager.webSocket) return
             Log.i(TAG, "Relay WS closed: $code $reason")
             isConnected = false
             sendStatusToWatch("disconnected")
@@ -61,6 +64,7 @@ object RelayWebSocketManager {
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (webSocket !== this@RelayWebSocketManager.webSocket) return
             Log.e(TAG, "Relay WS error", t)
             isConnected = false
             sendStatusToWatch("disconnected")
@@ -71,6 +75,7 @@ object RelayWebSocketManager {
     fun connect(ctx: Context, fromNodeId: String) {
         context = ctx.applicationContext
         watchNodeId = fromNodeId
+        reconnectJob?.cancel()
 
         val serverAddress = SettingsActivity.getServerAddress(ctx)
         val deviceId = "watch-relay"

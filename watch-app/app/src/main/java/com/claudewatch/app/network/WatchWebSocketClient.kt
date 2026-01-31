@@ -16,9 +16,11 @@ class WatchWebSocketClient {
     companion object {
         private const val TAG = "WatchWebSocket"
         private const val RECONNECT_DELAY_MS = 5000L
+        private const val DISCONNECT_GRACE_MS = 2000L
     }
 
     private var reconnectJob: Job? = null
+    private var disconnectGraceJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // State flows for UI observation
@@ -46,11 +48,27 @@ class WatchWebSocketClient {
         RelayClient.onWebSocketStatus = { status ->
             Log.i(TAG, "WS status via relay: $status")
             when (status) {
-                "connected" -> _connectionStatus.value = ConnectionStatus.CONNECTED
-                "connecting" -> _connectionStatus.value = ConnectionStatus.CONNECTING
+                "connected" -> {
+                    disconnectGraceJob?.cancel()
+                    _connectionStatus.value = ConnectionStatus.CONNECTED
+                }
+                "connecting" -> {
+                    if (_connectionStatus.value != ConnectionStatus.CONNECTED) {
+                        disconnectGraceJob?.cancel()
+                        _connectionStatus.value = ConnectionStatus.CONNECTING
+                    }
+                }
                 "disconnected" -> {
-                    _connectionStatus.value = ConnectionStatus.DISCONNECTED
-                    scheduleReconnect()
+                    if (_connectionStatus.value != ConnectionStatus.DISCONNECTED) {
+                        disconnectGraceJob?.cancel()
+                        disconnectGraceJob = scope.launch {
+                            delay(DISCONNECT_GRACE_MS)
+                            _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                            scheduleReconnect()
+                        }
+                    } else {
+                        scheduleReconnect()
+                    }
                 }
             }
         }
@@ -76,6 +94,7 @@ class WatchWebSocketClient {
 
     fun disconnect() {
         reconnectJob?.cancel()
+        disconnectGraceJob?.cancel()
         scope.launch {
             try {
                 RelayClient.wsDisconnect()
@@ -87,6 +106,7 @@ class WatchWebSocketClient {
     }
 
     fun destroy() {
+        disconnectGraceJob?.cancel()
         disconnect()
         RelayClient.onWebSocketMessage = null
         RelayClient.onWebSocketStatus = null
@@ -131,7 +151,13 @@ class WatchWebSocketClient {
                             timestamp = msgJson.optString("timestamp")
                         ))
                     }
-                    _chatMessages.value = messages
+                    val isSame = messages.size == _chatMessages.value.size &&
+                        messages.zip(_chatMessages.value).all { (a, b) ->
+                            a.role == b.role && a.content == b.content && a.timestamp == b.timestamp
+                        }
+                    if (!isSame) {
+                        _chatMessages.value = messages
+                    }
                 }
                 "prompt" -> {
                     val promptJson = json.optJSONObject("prompt")

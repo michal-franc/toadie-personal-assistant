@@ -46,6 +46,19 @@ cd watch-app && ./gradlew test
 cd phone-app && ./gradlew test
 ```
 
+## App Install Gotcha
+
+After `adb install`, the app process keeps running with old code in memory. Singletons like `RelayWebSocketManager` (phone) and static state won't update until the process restarts. **Always force-stop after install:**
+
+```bash
+# Phone app
+adb -s <phone> shell am force-stop com.claudewatch.companion
+
+# Watch app - just reopening it from launcher is enough since install kills it,
+# but if in doubt:
+adb -s <watch> shell am force-stop com.claudewatch.app
+```
+
 ## Don't
 
 - Don't add HTTPS/TLS support - use reverse proxy if needed
