@@ -31,19 +31,19 @@ class PhoneRelayService : WearableListenerService() {
         // Paths to watch
         private const val PATH_HTTP_RESPONSE = "/relay/http/response"
         private const val PATH_AUDIO_UPLOAD_RESPONSE = "/relay/audio/upload/response"
+
+        // Static so they survive service restarts
+        private val httpClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+        // Pending audio uploads: requestId -> metadata
+        private val pendingAudioMeta = java.util.concurrent.ConcurrentHashMap<String, JSONObject>()
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var wsManager: RelayWebSocketManager? = null
-
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
-
-    // Pending audio uploads: requestId -> metadata
-    private val pendingAudioMeta = mutableMapOf<String, JSONObject>()
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
         Log.d(TAG, "Message from watch: ${messageEvent.path}")
@@ -61,15 +61,12 @@ class PhoneRelayService : WearableListenerService() {
 
     private fun handleWsConnect(watchNodeId: String) {
         Log.i(TAG, "Watch requested WS connect")
-        if (wsManager == null) {
-            wsManager = RelayWebSocketManager(applicationContext)
-        }
-        wsManager?.connect(watchNodeId)
+        RelayWebSocketManager.connect(applicationContext, watchNodeId)
     }
 
     private fun handleWsDisconnect() {
         Log.i(TAG, "Watch requested WS disconnect")
-        wsManager?.disconnect()
+        RelayWebSocketManager.disconnect()
     }
 
     // --- HTTP relay ---
@@ -295,8 +292,6 @@ class PhoneRelayService : WearableListenerService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        wsManager?.destroy()
         scope.cancel()
-        httpClient.dispatcher.executorService.shutdown()
     }
 }

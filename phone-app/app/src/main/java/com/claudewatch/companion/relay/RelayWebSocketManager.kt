@@ -10,28 +10,31 @@ import okhttp3.*
 import java.util.concurrent.TimeUnit
 
 /**
- * Manages a WebSocket connection to the server on behalf of the watch.
+ * Singleton that manages a WebSocket connection to the server on behalf of the watch.
  * Forwards all server messages to the watch via DataLayer MessageClient.
+ *
+ * Must be a singleton because WearableListenerService instances are short-lived —
+ * Android creates and destroys them per message. The WebSocket must outlive the service.
  */
-class RelayWebSocketManager(private val context: Context) {
+object RelayWebSocketManager {
 
-    companion object {
-        private const val TAG = "RelayWSManager"
-        private const val RECONNECT_DELAY_MS = 5000L
-        const val PATH_WS_MESSAGE = "/relay/ws/message"
-        const val PATH_WS_STATUS = "/relay/ws/status"
-    }
+    private const val TAG = "RelayWSManager"
+    private const val RECONNECT_DELAY_MS = 5000L
+    const val PATH_WS_MESSAGE = "/relay/ws/message"
+    const val PATH_WS_STATUS = "/relay/ws/status"
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(30, TimeUnit.SECONDS)
         .build()
 
+    private var context: Context? = null
     private var webSocket: WebSocket? = null
     private var reconnectJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var watchNodeId: String? = null
-    private var isConnected = false
+    var isConnected = false
+        private set
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -65,10 +68,11 @@ class RelayWebSocketManager(private val context: Context) {
         }
     }
 
-    fun connect(fromNodeId: String) {
+    fun connect(ctx: Context, fromNodeId: String) {
+        context = ctx.applicationContext
         watchNodeId = fromNodeId
 
-        val serverAddress = SettingsActivity.getServerAddress(context)
+        val serverAddress = SettingsActivity.getServerAddress(ctx)
         val deviceId = "watch-relay"
         val wsUrl = "ws://$serverAddress/ws?device=watch&id=${java.net.URLEncoder.encode(deviceId, "UTF-8")}"
         Log.i(TAG, "Opening relay WebSocket: $wsUrl")
@@ -90,24 +94,22 @@ class RelayWebSocketManager(private val context: Context) {
         isConnected = false
     }
 
-    fun destroy() {
-        disconnect()
-        scope.cancel()
-    }
-
     private fun scheduleReconnect() {
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             delay(RECONNECT_DELAY_MS)
-            watchNodeId?.let { connect(it) }
+            val ctx = context ?: return@launch
+            val nodeId = watchNodeId ?: return@launch
+            connect(ctx, nodeId)
         }
     }
 
     private fun forwardToWatch(text: String) {
+        val ctx = context ?: return
         val nodeId = watchNodeId ?: return
         scope.launch {
             try {
-                Wearable.getMessageClient(context)
+                Wearable.getMessageClient(ctx)
                     .sendMessage(nodeId, PATH_WS_MESSAGE, text.toByteArray())
                     .await()
             } catch (e: Exception) {
@@ -117,10 +119,11 @@ class RelayWebSocketManager(private val context: Context) {
     }
 
     private fun sendStatusToWatch(status: String) {
+        val ctx = context ?: return
         val nodeId = watchNodeId ?: return
         scope.launch {
             try {
-                Wearable.getMessageClient(context)
+                Wearable.getMessageClient(ctx)
                     .sendMessage(nodeId, PATH_WS_STATUS, status.toByteArray())
                     .await()
             } catch (e: Exception) {

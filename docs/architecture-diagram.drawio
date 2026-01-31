@@ -1,4 +1,4 @@
-<mxfile host="embed.diagrams.net" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36" version="29.3.6" pages="7">
+<mxfile host="embed.diagrams.net" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36" version="29.3.6" pages="8">
   <diagram id="IPA-4rBEDlcztsOa1QDi" name="Strona-1">
     <mxGraphModel dx="2240" dy="879" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
@@ -13,13 +13,13 @@
         <mxCell id="watch" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Galaxy Watch&#xa;(Wear OS)" vertex="1">
           <mxGeometry height="45" width="170" x="65" y="95" as="geometry" />
         </mxCell>
-        <mxCell id="watch-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Voice recording · Audio playback&#xa;Permission prompts · State indicator" vertex="1">
+        <mxCell id="watch-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Voice recording · Audio playback&#xa;Relays all traffic via phone (DataLayer)" vertex="1">
           <mxGeometry height="30" width="170" x="65" y="140" as="geometry" />
         </mxCell>
-        <mxCell id="phone" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Android Phone&#xa;(Companion App)" vertex="1">
+        <mxCell id="phone" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Android Phone&#xa;(Relay + Companion)" vertex="1">
           <mxGeometry height="45" width="170" x="65" y="185" as="geometry" />
         </mxCell>
-        <mxCell id="phone-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Text/voice input · Creature UI&#xa;Permission approval · Kiosk mode" vertex="1">
+        <mxCell id="phone-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Watch relay (DataLayer) · Tailscale VPN&#xa;Text/voice · Creature UI" vertex="1">
           <mxGeometry height="30" width="170" x="65" y="230" as="geometry" />
         </mxCell>
         <mxCell id="dashboard" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Web Dashboard&#xa;(Vue.js 3)" vertex="1">
@@ -76,7 +76,7 @@
         <mxCell id="e1" edge="1" parent="1" source="watch" style="endArrow=classic;strokeColor=#333333;exitX=1;exitY=0.5;entryX=0;entryY=0.5;curved=1;" target="http">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e1-label" connectable="0" parent="e1" style="edgeLabel;fontSize=9;fillColor=#ffffff;strokeColor=none;fontColor=#666666;" value="audio / text" vertex="1">
+        <mxCell id="e1-label" connectable="0" parent="e1" style="edgeLabel;fontSize=9;fillColor=#ffffff;strokeColor=none;fontColor=#666666;" value="DataLayer (BT)" vertex="1">
           <mxGeometry relative="1" x="-0.1" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
@@ -87,7 +87,7 @@
         <mxCell id="e2" edge="1" parent="1" source="watch" style="endArrow=classic;startArrow=classic;strokeColor=#0099FF;exitX=1;exitY=0.5;entryX=0;entryY=0.3;curved=1;strokeWidth=1;dashed=1;" target="ws">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e2-label" connectable="0" parent="e2" style="edgeLabel;fontSize=8;fillColor=#ffffff;strokeColor=none;fontColor=#0099FF;" value="WebSocket" vertex="1">
+        <mxCell id="e2-label" connectable="0" parent="e2" style="edgeLabel;fontSize=8;fillColor=#ffffff;strokeColor=none;fontColor=#0099FF;" value="DataLayer relay" vertex="1">
           <mxGeometry relative="1" x="-0.1" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
@@ -161,13 +161,13 @@
         <mxCell id="4" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Galaxy Watch&#xa;(Wear OS)" vertex="1">
           <mxGeometry height="45" width="170" x="65" y="95" as="geometry" />
         </mxCell>
-        <mxCell id="5" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Voice recording · Audio playback&#xa;Permission prompts · State indicator" vertex="1">
+        <mxCell id="5" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Voice recording · Audio playback&#xa;Relays all traffic via phone (DataLayer)" vertex="1">
           <mxGeometry height="30" width="170" x="65" y="140" as="geometry" />
         </mxCell>
-        <mxCell id="6" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Android Phone&#xa;(Companion App)" vertex="1">
+        <mxCell id="6" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Android Phone&#xa;(Relay + Companion)" vertex="1">
           <mxGeometry height="45" width="170" x="65" y="185" as="geometry" />
         </mxCell>
-        <mxCell id="7" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Text/voice input · Creature UI&#xa;Permission approval · Kiosk mode" vertex="1">
+        <mxCell id="7" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Watch relay (DataLayer) · Tailscale VPN&#xa;Text/voice · Creature UI" vertex="1">
           <mxGeometry height="30" width="170" x="65" y="230" as="geometry" />
         </mxCell>
         <mxCell id="8" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Web Dashboard&#xa;(Vue.js 3)" vertex="1">
@@ -224,7 +224,7 @@
         <mxCell id="25" edge="1" parent="1" source="4" style="endArrow=classic;strokeColor=#333333;exitX=1;exitY=0.5;entryX=0;entryY=0.5;curved=1;" target="10">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="26" connectable="0" parent="25" style="edgeLabel;fontSize=9;fillColor=#ffffff;strokeColor=none;fontColor=#666666;" value="audio / text" vertex="1">
+        <mxCell id="26" connectable="0" parent="25" style="edgeLabel;fontSize=9;fillColor=#ffffff;strokeColor=none;fontColor=#666666;" value="DataLayer (BT)" vertex="1">
           <mxGeometry relative="1" x="-0.1" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
@@ -235,7 +235,7 @@
         <mxCell id="28" edge="1" parent="1" source="4" style="endArrow=classic;startArrow=classic;strokeColor=#0099FF;exitX=1;exitY=0.5;entryX=0;entryY=0.3;curved=1;strokeWidth=1;dashed=1;" target="12">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="29" connectable="0" parent="28" style="edgeLabel;fontSize=8;fillColor=#ffffff;strokeColor=none;fontColor=#0099FF;" value="WebSocket" vertex="1">
+        <mxCell id="29" connectable="0" parent="28" style="edgeLabel;fontSize=8;fillColor=#ffffff;strokeColor=none;fontColor=#0099FF;" value="DataLayer relay" vertex="1">
           <mxGeometry relative="1" x="-0.1" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
@@ -296,13 +296,13 @@
         <mxCell id="watch" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Galaxy Watch&#xa;(Wear OS)" vertex="1">
           <mxGeometry height="45" width="170" x="65" y="95" as="geometry" />
         </mxCell>
-        <mxCell id="watch-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Voice recording · Audio playback&#xa;Permission prompts · State indicator" vertex="1">
+        <mxCell id="watch-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Voice recording · Audio playback&#xa;Relays all traffic via phone (DataLayer)" vertex="1">
           <mxGeometry height="30" width="170" x="65" y="140" as="geometry" />
         </mxCell>
-        <mxCell id="phone" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Android Phone&#xa;(Companion App)" vertex="1">
+        <mxCell id="phone" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Android Phone&#xa;(Relay + Companion)" vertex="1">
           <mxGeometry height="45" width="170" x="65" y="185" as="geometry" />
         </mxCell>
-        <mxCell id="phone-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Text/voice input · Creature UI&#xa;Permission approval · Kiosk mode" vertex="1">
+        <mxCell id="phone-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Watch relay (DataLayer) · Tailscale VPN&#xa;Text/voice · Creature UI" vertex="1">
           <mxGeometry height="30" width="170" x="65" y="230" as="geometry" />
         </mxCell>
         <mxCell id="dashboard" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Web Dashboard&#xa;(Vue.js 3)" vertex="1">
@@ -359,7 +359,7 @@
         <mxCell id="e1" edge="1" parent="1" source="watch" style="endArrow=classic;strokeColor=#333333;exitX=1;exitY=0.5;entryX=0;entryY=0.5;curved=1;" target="http">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e1-label" connectable="0" parent="e1" style="edgeLabel;fontSize=9;fillColor=#ffffff;strokeColor=none;fontColor=#666666;" value="audio / text" vertex="1">
+        <mxCell id="e1-label" connectable="0" parent="e1" style="edgeLabel;fontSize=9;fillColor=#ffffff;strokeColor=none;fontColor=#666666;" value="DataLayer (BT)" vertex="1">
           <mxGeometry relative="1" x="-0.1" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
@@ -370,7 +370,7 @@
         <mxCell id="e2" edge="1" parent="1" source="watch" style="endArrow=classic;startArrow=classic;strokeColor=#0099FF;exitX=1;exitY=0.5;entryX=0;entryY=0.3;curved=1;strokeWidth=1;dashed=1;" target="ws">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e2-label" connectable="0" parent="e2" style="edgeLabel;fontSize=8;fillColor=#ffffff;strokeColor=none;fontColor=#0099FF;" value="WebSocket" vertex="1">
+        <mxCell id="e2-label" connectable="0" parent="e2" style="edgeLabel;fontSize=8;fillColor=#ffffff;strokeColor=none;fontColor=#0099FF;" value="DataLayer relay" vertex="1">
           <mxGeometry relative="1" x="-0.1" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
@@ -707,13 +707,13 @@
         <mxCell id="watch" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Galaxy Watch&#xa;(Wear OS)" vertex="1">
           <mxGeometry height="45" width="170" x="65" y="95" as="geometry" />
         </mxCell>
-        <mxCell id="watch-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Voice recording · Audio playback&#xa;Permission prompts · State indicator" vertex="1">
+        <mxCell id="watch-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Voice recording · Audio playback&#xa;Relays all traffic via phone (DataLayer)" vertex="1">
           <mxGeometry height="30" width="170" x="65" y="140" as="geometry" />
         </mxCell>
-        <mxCell id="phone" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Android Phone&#xa;(Companion App)" vertex="1">
+        <mxCell id="phone" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Android Phone&#xa;(Relay + Companion)" vertex="1">
           <mxGeometry height="45" width="170" x="65" y="185" as="geometry" />
         </mxCell>
-        <mxCell id="phone-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Text/voice input · Creature UI&#xa;Permission approval · Kiosk mode" vertex="1">
+        <mxCell id="phone-detail" parent="1" style="text;fontSize=9;align=center;fillColor=none;strokeColor=none;fontColor=#666666;" value="Watch relay (DataLayer) · Tailscale VPN&#xa;Text/voice · Creature UI" vertex="1">
           <mxGeometry height="30" width="170" x="65" y="230" as="geometry" />
         </mxCell>
         <mxCell id="dashboard" parent="1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;fontSize=11;align=center;whiteSpace=wrap;" value="Web Dashboard&#xa;(Vue.js 3)" vertex="1">
@@ -770,7 +770,7 @@
         <mxCell id="e1" edge="1" parent="1" source="watch" style="endArrow=classic;strokeColor=#333333;exitX=1;exitY=0.5;entryX=0;entryY=0.5;curved=1;" target="http">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e1-label" connectable="0" parent="e1" style="edgeLabel;fontSize=9;fillColor=#ffffff;strokeColor=none;fontColor=#666666;" value="audio / text" vertex="1">
+        <mxCell id="e1-label" connectable="0" parent="e1" style="edgeLabel;fontSize=9;fillColor=#ffffff;strokeColor=none;fontColor=#666666;" value="DataLayer (BT)" vertex="1">
           <mxGeometry relative="1" x="-0.1" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
@@ -781,7 +781,7 @@
         <mxCell id="e2" edge="1" parent="1" source="watch" style="endArrow=classic;startArrow=classic;strokeColor=#0099FF;exitX=1;exitY=0.5;entryX=0;entryY=0.3;curved=1;strokeWidth=1;dashed=1;" target="ws">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e2-label" connectable="0" parent="e2" style="edgeLabel;fontSize=8;fillColor=#ffffff;strokeColor=none;fontColor=#0099FF;" value="WebSocket" vertex="1">
+        <mxCell id="e2-label" connectable="0" parent="e2" style="edgeLabel;fontSize=8;fillColor=#ffffff;strokeColor=none;fontColor=#0099FF;" value="DataLayer relay" vertex="1">
           <mxGeometry relative="1" x="-0.1" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
@@ -1154,6 +1154,87 @@
         </mxCell>
         <mxCell id="we6" style="endArrow=classic;strokeColor=#333333;exitX=0.2;exitY=1;entryX=0.5;entryY=0;curved=1;" edge="1" source="w-main" target="w-player" parent="1">
           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="Phone Relay Architecture" id="relay-arch-001">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="600" math="0" shadow="0">
+      <root>
+        <mxCell id="r0" />
+        <mxCell id="r1" parent="r0" />
+        <mxCell id="r-title" parent="r1" style="text;fontSize=20;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#333333;" value="Phone Relay Architecture" vertex="1">
+          <mxGeometry height="30" width="400" x="210" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="r-watch-bg" parent="r1" style="rounded=1;fillColor=#e3f2fd;strokeColor=#000000;strokeWidth=1;dashed=1;fontSize=11;fontStyle=1;verticalAlign=top;align=center;" value="Galaxy Watch (Wear OS)" vertex="1">
+          <mxGeometry height="200" width="180" x="30" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="r-relay-client" parent="r1" style="rounded=1;fillColor=#bbdefb;strokeColor=#000000;strokeWidth=1;fontSize=10;align=center;whiteSpace=wrap;" value="RelayClient&#xa;(singleton)" vertex="1">
+          <mxGeometry height="35" width="150" x="45" y="115" as="geometry" />
+        </mxCell>
+        <mxCell id="r-relay-msg-svc" parent="r1" style="rounded=1;fillColor=#bbdefb;strokeColor=#000000;strokeWidth=1;fontSize=10;align=center;whiteSpace=wrap;" value="RelayMessageService&#xa;(WearableListenerService)" vertex="1">
+          <mxGeometry height="35" width="150" x="45" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="r-watch-ws" parent="r1" style="rounded=1;fillColor=#bbdefb;strokeColor=#000000;strokeWidth=1;fontSize=10;align=center;whiteSpace=wrap;" value="WatchWebSocketClient&#xa;(uses relay)" vertex="1">
+          <mxGeometry height="35" width="150" x="45" y="205" as="geometry" />
+        </mxCell>
+        <mxCell id="r-datalayer" parent="r1" style="rounded=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=2;fontSize=11;fontStyle=1;align=center;whiteSpace=wrap;" value="Wearable DataLayer API&#xa;MessageClient + ChannelClient&#xa;(Bluetooth)" vertex="1">
+          <mxGeometry height="55" width="200" x="250" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="r-phone-bg" parent="r1" style="rounded=1;fillColor=#fff3e0;strokeColor=#000000;strokeWidth=1;dashed=1;fontSize=11;fontStyle=1;verticalAlign=top;align=center;" value="Android Phone (Relay + Companion)" vertex="1">
+          <mxGeometry height="200" width="180" x="490" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="r-phone-relay" parent="r1" style="rounded=1;fillColor=#ffe0b2;strokeColor=#000000;strokeWidth=1;fontSize=10;align=center;whiteSpace=wrap;" value="PhoneRelayService&#xa;(WearableListenerService)" vertex="1">
+          <mxGeometry height="35" width="150" x="505" y="115" as="geometry" />
+        </mxCell>
+        <mxCell id="r-ws-mgr" parent="r1" style="rounded=1;fillColor=#ffe0b2;strokeColor=#000000;strokeWidth=1;fontSize=10;align=center;whiteSpace=wrap;" value="RelayWebSocketManager&#xa;(OkHttp WebSocket)" vertex="1">
+          <mxGeometry height="35" width="150" x="505" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="r-phone-http" parent="r1" style="rounded=1;fillColor=#ffe0b2;strokeColor=#000000;strokeWidth=1;fontSize=10;align=center;whiteSpace=wrap;" value="OkHttp Client&#xa;(HTTP relay)" vertex="1">
+          <mxGeometry height="35" width="150" x="505" y="205" as="geometry" />
+        </mxCell>
+        <mxCell id="r-tailscale" parent="r1" style="rounded=1;fillColor=#e8eaf6;strokeColor=#3f51b5;strokeWidth=2;fontSize=11;fontStyle=1;align=center;whiteSpace=wrap;" value="Tailscale VPN&#xa;198.51.100.1" vertex="1">
+          <mxGeometry height="45" width="160" x="420" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="r-server-bg" parent="r1" style="rounded=1;fillColor=#fffde7;strokeColor=#000000;strokeWidth=1;dashed=1;fontSize=11;fontStyle=1;verticalAlign=top;align=center;" value="Server (Python)" vertex="1">
+          <mxGeometry height="130" width="180" x="620" y="310" as="geometry" />
+        </mxCell>
+        <mxCell id="r-http-srv" parent="r1" style="rounded=1;fillColor=#a5d6a7;strokeColor=#000000;strokeWidth=1;fontSize=10;align=center;whiteSpace=wrap;" value="HTTP :5566&#xa;/transcribe · /api/*" vertex="1">
+          <mxGeometry height="35" width="150" x="635" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="r-ws-srv" parent="r1" style="rounded=1;fillColor=#a5d6a7;strokeColor=#000000;strokeWidth=1;fontSize=10;align=center;whiteSpace=wrap;" value="WebSocket :5567&#xa;state · chat · permission" vertex="1">
+          <mxGeometry height="35" width="150" x="635" y="385" as="geometry" />
+        </mxCell>
+        <mxCell id="r-e1" edge="1" parent="r1" source="r-relay-client" target="r-datalayer" style="endArrow=classic;startArrow=classic;strokeColor=#2e7d32;strokeWidth=2;curved=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r-e1-label" connectable="0" parent="r-e1" style="edgeLabel;fontSize=8;fillColor=#ffffff;strokeColor=none;fontColor=#2e7d32;" value="HTTP req/resp&#xa;WS messages&#xa;Audio streams" vertex="1">
+          <mxGeometry relative="1" x="-0.1" as="geometry">
+            <mxPoint y="-10" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r-e2" edge="1" parent="r1" source="r-datalayer" target="r-phone-relay" style="endArrow=classic;startArrow=classic;strokeColor=#2e7d32;strokeWidth=2;curved=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r-e3" edge="1" parent="r1" source="r-phone-bg" target="r-tailscale" style="endArrow=classic;startArrow=classic;strokeColor=#3f51b5;strokeWidth=2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r-e3-label" connectable="0" parent="r-e3" style="edgeLabel;fontSize=9;fillColor=#ffffff;strokeColor=none;fontColor=#3f51b5;fontStyle=1;" value="Tailscale" vertex="1">
+          <mxGeometry relative="1" x="-0.2" as="geometry">
+            <mxPoint x="-30" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r-e4" edge="1" parent="r1" source="r-tailscale" target="r-server-bg" style="endArrow=classic;startArrow=classic;strokeColor=#3f51b5;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r-legend" parent="r1" style="rounded=1;fillColor=#fafafa;strokeColor=#cccccc;strokeWidth=1;" value="" vertex="1">
+          <mxGeometry height="110" width="350" x="30" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="r-legend-title" parent="r1" style="text;fontSize=10;fontStyle=1;align=left;fillColor=none;strokeColor=none;fontColor=#333333;" value="Message Protocol" vertex="1">
+          <mxGeometry height="15" width="200" x="40" y="325" as="geometry" />
+        </mxCell>
+        <mxCell id="r-legend-text" parent="r1" style="text;fontSize=8;align=left;fillColor=none;strokeColor=none;fontColor=#666666;whiteSpace=wrap;" value="/relay/ws/connect · /relay/ws/disconnect — WS lifecycle&#xa;/relay/ws/message · /relay/ws/status — WS data&#xa;/relay/http/request · /relay/http/response — HTTP relay&#xa;/relay/audio/upload · /relay/audio/download — Audio (ChannelClient)&#xa;&#xa;Watch has no server IP — all traffic via phone relay" vertex="1">
+          <mxGeometry height="80" width="330" x="40" y="345" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
