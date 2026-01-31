@@ -24,8 +24,8 @@ class CreatureView @JvmOverloads constructor(
     private var thinkingBubbleProgress = 0f
 
     // Smooth transition properties (interpolated between states)
-    private var earAngle = 0f
-    private var targetEarAngle = 0f
+    private var hornAngle = 0f
+    private var targetHornAngle = 0f
     private var pupilOffsetX = 0f
     private var pupilOffsetY = 0f
     private var targetPupilOffsetX = 0f
@@ -68,13 +68,22 @@ class CreatureView @JvmOverloads constructor(
                 centerX, centerY - radius * 0.3f,
                 gradientRadius,
                 intArrayOf(
-                    context.getColor(R.color.creature_orange_light),
-                    context.getColor(R.color.creature_orange_dark)
+                    context.getColor(R.color.creature_green_light),
+                    context.getColor(R.color.creature_green_dark)
                 ),
                 floatArrayOf(0.3f, 1f),
                 Shader.TileMode.CLAMP
             )
         }
+
+    private val hornPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
+    private val furPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
 
     private val eyePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -100,6 +109,10 @@ class CreatureView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
 
+    private val eyeGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
@@ -117,6 +130,22 @@ class CreatureView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeWidth = 4f
         strokeCap = Paint.Cap.ROUND
+    }
+
+    private val nosePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
+    private val noseHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(60, 255, 255, 255)
+        style = Paint.Style.FILL
+    }
+
+    private val wrinklePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f
+        strokeCap = Paint.Cap.ROUND
+        color = Color.argb(30, 0, 0, 0)
     }
 
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -198,10 +227,10 @@ class CreatureView @JvmOverloads constructor(
         }
 
         // Set targets based on new state
-        targetEarAngle = when (state) {
-            CreatureState.LISTENING -> -20f
-            CreatureState.OFFLINE -> 30f
-            CreatureState.SLEEPING -> 20f
+        targetHornAngle = when (state) {
+            CreatureState.LISTENING -> -15f
+            CreatureState.OFFLINE -> 25f
+            CreatureState.SLEEPING -> 15f
             else -> 0f
         }
         targetPupilOffsetX = 0f
@@ -220,7 +249,7 @@ class CreatureView @JvmOverloads constructor(
         }
 
         // Animate from current values to targets
-        val startEar = earAngle
+        val startHorn = hornAngle
         val startPupilX = pupilOffsetX
         val startPupilY = pupilOffsetY
         val startEyeClosure = eyeClosure
@@ -232,7 +261,7 @@ class CreatureView @JvmOverloads constructor(
             interpolator = AccelerateDecelerateInterpolator()
             addUpdateListener { animator ->
                 val t = animator.animatedValue as Float
-                earAngle = startEar + (targetEarAngle - startEar) * t
+                hornAngle = startHorn + (targetHornAngle - startHorn) * t
                 pupilOffsetX = startPupilX + (targetPupilOffsetX - startPupilX) * t
                 pupilOffsetY = startPupilY + (targetPupilOffsetY - startPupilY) * t
                 eyeClosure = startEyeClosure + (targetEyeClosure - startEyeClosure) * t
@@ -267,16 +296,22 @@ class CreatureView @JvmOverloads constructor(
         canvas.translate(0f, -bounceOffset)
         canvas.scale(breathScale, breathScale, centerX, centerY)
 
-        // Draw body (blob shape)
+        // Draw body (wider troll shape)
         drawBody(canvas, centerX, centerY, baseRadius)
 
-        // Draw ears
-        drawEars(canvas, centerX, centerY, baseRadius)
+        // Draw horns
+        drawHorns(canvas, centerX, centerY, baseRadius)
 
-        // Draw eyes
+        // Draw fur tufts on cheeks
+        drawFur(canvas, centerX, centerY, baseRadius)
+
+        // Draw eyes (larger, yellow)
         drawEyes(canvas, centerX, centerY, baseRadius)
 
-        // Draw mouth
+        // Draw nose
+        drawNose(canvas, centerX, centerY, baseRadius)
+
+        // Draw mouth (wider grin)
         drawMouth(canvas, centerX, centerY, baseRadius)
 
         canvas.restore()
@@ -301,7 +336,7 @@ class CreatureView @JvmOverloads constructor(
     private fun drawShadowAndGlow(canvas: Canvas, cx: Float, cy: Float, radius: Float, breathScale: Float, bounceOffset: Float) {
         val shadowCx = cx
         val shadowCy = cy + radius * 1.15f - bounceOffset * 0.3f
-        val shadowRadiusX = radius * 0.7f * breathScale
+        val shadowRadiusX = radius * 0.8f * breathScale
         val shadowRadiusY = radius * 0.15f
 
         // Dark shadow oval
@@ -319,16 +354,13 @@ class CreatureView @JvmOverloads constructor(
 
         // State-colored glow
         val glowColor = when (currentState) {
-            CreatureState.IDLE -> context.getColor(R.color.creature_glow_orange)
+            CreatureState.IDLE -> context.getColor(R.color.creature_glow_idle)
             CreatureState.THINKING -> {
                 val alpha = (30 + 20 * sin(thinkingBubbleProgress * Math.PI.toFloat() * 2)).toInt()
                 Color.argb(alpha, 0, 0x99, 0xFF)
             }
             CreatureState.SPEAKING -> context.getColor(R.color.creature_glow_green)
-            CreatureState.LISTENING -> {
-                // Brighter orange for listening
-                Color.argb(80, 0xF5, 0x9E, 0x0B)
-            }
+            CreatureState.LISTENING -> context.getColor(R.color.creature_glow_listening)
             CreatureState.SLEEPING -> context.getColor(R.color.creature_glow_purple)
             CreatureState.OFFLINE -> Color.TRANSPARENT
         }
@@ -352,55 +384,138 @@ class CreatureView @JvmOverloads constructor(
     private fun drawBody(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
         bodyPaint.shader = bodyGradient
 
-        // Create a blob-like path
-        val path = Path()
         val wobble = if (currentState == CreatureState.SPEAKING) {
             sin(animationProgress * Math.PI.toFloat() * 4) * 5f
         } else 0f
 
+        // Wider, squatter troll shape: wider rx, shorter ry
+        val path = Path()
+        val rx = radius * 1.15f + wobble
+        val ry = radius * 0.95f
+
+        // Upper head (rounded top)
         path.addOval(
-            cx - radius - wobble,
-            cy - radius * 0.9f,
-            cx + radius + wobble,
-            cy + radius * 1.1f,
+            cx - rx,
+            cy - ry * 0.85f,
+            cx + rx,
+            cy + ry * 1.05f,
             Path.Direction.CW
         )
-
         canvas.drawPath(path, bodyPaint)
+
+        // Prominent jaw/chin bump
+        val jawPath = Path()
+        jawPath.addOval(
+            cx - rx * 0.7f,
+            cy + ry * 0.55f,
+            cx + rx * 0.7f,
+            cy + ry * 1.2f,
+            Path.Direction.CW
+        )
+        canvas.drawPath(jawPath, bodyPaint)
+
+        // Subtle wrinkle lines on face
+        val wrinkleY = cy - radius * 0.02f
+        canvas.drawLine(cx - radius * 0.15f, wrinkleY, cx + radius * 0.15f, wrinkleY, wrinklePaint)
+        canvas.drawLine(cx - radius * 0.1f, wrinkleY + radius * 0.06f, cx + radius * 0.1f, wrinkleY + radius * 0.06f, wrinklePaint)
     }
 
-    private fun drawEars(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
-        val earRadius = radius * 0.2f
-        val earOffset = radius * 0.7f
+    private fun drawHorns(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
+        val hornWidth = radius * 0.15f
+        val hornHeight = radius * 0.55f
+        val hornSpacing = radius * 0.4f
 
-        canvas.save()
-        // Left ear — uses smoothly interpolated earAngle
-        canvas.save()
-        canvas.rotate(earAngle, cx - earOffset, cy - radius * 0.6f)
-        canvas.drawCircle(cx - earOffset, cy - radius * 0.8f, earRadius, bodyPaint)
-        canvas.restore()
+        for (side in listOf(-1f, 1f)) {
+            val hornBaseX = cx + side * hornSpacing
+            val hornBaseY = cy - radius * 0.75f
 
-        // Right ear
-        canvas.save()
-        canvas.rotate(-earAngle, cx + earOffset, cy - radius * 0.6f)
-        canvas.drawCircle(cx + earOffset, cy - radius * 0.8f, earRadius, bodyPaint)
-        canvas.restore()
-        canvas.restore()
+            canvas.save()
+            canvas.rotate(side * hornAngle, hornBaseX, hornBaseY)
+
+            val hornPath = Path()
+            // Triangular/conical horn
+            hornPath.moveTo(hornBaseX - hornWidth, hornBaseY)
+            hornPath.lineTo(hornBaseX + side * hornWidth * 0.3f, hornBaseY - hornHeight)
+            hornPath.lineTo(hornBaseX + hornWidth, hornBaseY)
+            hornPath.close()
+
+            // Gradient fill: bone base to pink inner
+            hornPaint.shader = LinearGradient(
+                hornBaseX, hornBaseY,
+                hornBaseX, hornBaseY - hornHeight,
+                intArrayOf(
+                    context.getColor(R.color.creature_horn_base),
+                    context.getColor(R.color.creature_horn_inner)
+                ),
+                floatArrayOf(0f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawPath(hornPath, hornPaint)
+
+            canvas.restore()
+        }
+    }
+
+    private fun drawFur(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
+        val furColor = context.getColor(R.color.creature_fur)
+        furPaint.color = furColor
+        furPaint.alpha = when (currentState) {
+            CreatureState.SLEEPING -> 140
+            else -> 180
+        }
+        furPaint.strokeWidth = radius * 0.04f
+
+        // Fur animation
+        val furOffset = when (currentState) {
+            CreatureState.SPEAKING -> sin(animationProgress * Math.PI.toFloat() * 3) * 3f
+            CreatureState.SLEEPING -> 2f  // droops
+            else -> 0f
+        }
+
+        for (side in listOf(-1f, 1f)) {
+            val baseX = cx + side * radius * 0.95f
+            val baseY = cy - radius * 0.05f
+
+            // Multiple small curved fur strokes
+            for (i in 0..4) {
+                val offsetY = i * radius * 0.08f
+                val path = Path()
+                path.moveTo(baseX, baseY + offsetY)
+                path.quadTo(
+                    baseX + side * radius * 0.2f,
+                    baseY + offsetY + radius * 0.05f + furOffset,
+                    baseX + side * radius * 0.15f,
+                    baseY + offsetY + radius * 0.12f + furOffset
+                )
+                canvas.drawPath(path, furPaint)
+            }
+        }
     }
 
     private fun drawEyes(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
-        val eyeRadius = radius * 0.18f
-        val eyeSpacing = radius * 0.35f
-        val eyeY = cy - radius * 0.15f
+        val eyeRadius = radius * 0.22f  // Larger eyes for troll
+        val eyeSpacing = radius * 0.38f
+        val eyeY = cy - radius * 0.18f
 
         // Combine interpolated state closure with blink
         val effectiveClosure = maxOf(eyeClosure, blinkProgress)
-
         val eyeScaleY = 1f - effectiveClosure * 0.9f
 
         // Draw each eye (left then right)
-        for (side in listOf(-1f, 1f)) {
+        for ((idx, side) in listOf(-1f, 1f).withIndex()) {
             val ex = cx + side * eyeSpacing
+
+            // Subtle yellow glow behind eyes when active
+            if (currentState != CreatureState.OFFLINE && currentState != CreatureState.SLEEPING) {
+                eyeGlowPaint.shader = RadialGradient(
+                    ex, eyeY,
+                    maxOf(eyeRadius * 1.6f, 1f),
+                    intArrayOf(Color.argb(40, 0xE8, 0xB4, 0x00), Color.TRANSPARENT),
+                    floatArrayOf(0.2f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawCircle(ex, eyeY, eyeRadius * 1.6f, eyeGlowPaint)
+            }
 
             canvas.save()
             canvas.scale(1f, eyeScaleY, ex, eyeY)
@@ -443,10 +558,12 @@ class CreatureView @JvmOverloads constructor(
                 }
                 val pupilRadius = irisRadius * 0.55f * pupilDilate
 
-                val irisX = ex + pupilOffsetX
+                // Slightly asymmetric pupil positions for character
+                val asymOffset = if (idx == 0) -1f else 1.5f
+                val irisX = ex + pupilOffsetX + asymOffset
                 val irisY = eyeY + pupilOffsetY
 
-                // Iris with gradient
+                // Iris with yellow/amber gradient
                 irisPaint.shader = RadialGradient(
                     irisX, irisY,
                     maxOf(irisRadius, 1f),
@@ -476,35 +593,80 @@ class CreatureView @JvmOverloads constructor(
         }
     }
 
+    private fun drawNose(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
+        val noseX = cx
+        val noseY = cy + radius * 0.12f
+        val noseRx = radius * 0.08f
+        val noseRy = radius * 0.06f
+
+        // Slightly darker green nose
+        nosePaint.shader = RadialGradient(
+            noseX, noseY,
+            maxOf(noseRx * 1.5f, 1f),
+            intArrayOf(
+                context.getColor(R.color.creature_green_dark),
+                context.getColor(R.color.creature_fur)
+            ),
+            floatArrayOf(0.3f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawOval(
+            noseX - noseRx, noseY - noseRy,
+            noseX + noseRx, noseY + noseRy,
+            nosePaint
+        )
+
+        // Small highlight
+        canvas.drawOval(
+            noseX - noseRx * 0.4f, noseY - noseRy * 0.6f,
+            noseX + noseRx * 0.2f, noseY - noseRy * 0.1f,
+            noseHighlightPaint
+        )
+    }
+
     private fun drawMouth(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
-        val mouthY = cy + radius * 0.35f
-        val mouthWidth = radius * 0.4f
+        val mouthY = cy + radius * 0.38f
+        val mouthWidth = radius * 0.6f  // Much wider grin
 
         val path = Path()
         when (currentState) {
             CreatureState.SPEAKING -> {
-                // Open mouth animation
+                // Wide open mouth animation
                 val openAmount = sin(animationProgress * Math.PI.toFloat() * 3) * 0.5f + 0.5f
                 path.addOval(
-                    cx - mouthWidth * 0.5f,
-                    mouthY - radius * 0.1f * openAmount,
-                    cx + mouthWidth * 0.5f,
-                    mouthY + radius * 0.2f * openAmount,
+                    cx - mouthWidth * 0.6f,
+                    mouthY - radius * 0.12f * openAmount,
+                    cx + mouthWidth * 0.6f,
+                    mouthY + radius * 0.25f * openAmount,
                     Path.Direction.CW
                 )
                 canvas.drawPath(path, Paint(pupilPaint).apply { style = Paint.Style.FILL })
             }
             CreatureState.OFFLINE -> {
                 // Sad frown
-                path.moveTo(cx - mouthWidth, mouthY + 10f)
-                path.quadTo(cx, mouthY - 10f, cx + mouthWidth, mouthY + 10f)
+                path.moveTo(cx - mouthWidth * 0.7f, mouthY + 10f)
+                path.quadTo(cx, mouthY - 12f, cx + mouthWidth * 0.7f, mouthY + 10f)
                 canvas.drawPath(path, mouthPaint)
             }
             else -> {
-                // Happy smile
+                // Wide, friendly grin with slight underbite feel
                 path.moveTo(cx - mouthWidth, mouthY)
-                path.quadTo(cx, mouthY + 20f, cx + mouthWidth, mouthY)
+                path.cubicTo(
+                    cx - mouthWidth * 0.5f, mouthY + 25f,
+                    cx + mouthWidth * 0.5f, mouthY + 25f,
+                    cx + mouthWidth, mouthY
+                )
                 canvas.drawPath(path, mouthPaint)
+
+                // Subtle underbite line below the grin
+                val underPath = Path()
+                underPath.moveTo(cx - mouthWidth * 0.5f, mouthY + 18f)
+                underPath.quadTo(cx, mouthY + 22f, cx + mouthWidth * 0.5f, mouthY + 18f)
+                val underPaint = Paint(mouthPaint).apply {
+                    strokeWidth = 2f
+                    alpha = 80
+                }
+                canvas.drawPath(underPath, underPaint)
             }
         }
     }
@@ -598,7 +760,7 @@ class CreatureView @JvmOverloads constructor(
 
         when (currentState) {
             CreatureState.SPEAKING -> {
-                // Gold sparkles rising from body
+                // Gold sparkles rising from body (matches yellow eyes)
                 particles.add(Particle(
                     x = cx + rng(-radius * 0.5f, radius * 0.5f),
                     y = cy + rng(-radius * 0.3f, radius * 0.3f),
@@ -624,21 +786,21 @@ class CreatureView @JvmOverloads constructor(
                 ))
             }
             CreatureState.LISTENING -> {
-                // Pulse rings expanding from ears
+                // Pulse rings expanding from horns (green tones)
                 val side = if (Math.random() > 0.5) -1f else 1f
                 particles.add(Particle(
-                    x = cx + side * radius * 0.7f,
-                    y = cy - radius * 0.6f,
+                    x = cx + side * radius * 0.4f,
+                    y = cy - radius * 0.75f,
                     vx = 0f,
                     vy = 0f,
                     life = 1f,
                     size = 5f,
-                    color = Color.argb(120, 0xF5, 0x9E, 0x0B),
+                    color = Color.argb(120, 0x66, 0xBB, 0x6A),
                     type = ParticleType.RING
                 ))
             }
             CreatureState.IDLE -> {
-                // Sparse ambient motes
+                // Sparse ambient green motes
                 particles.add(Particle(
                     x = cx + rng(-radius, radius),
                     y = cy + rng(-radius * 0.5f, radius * 0.5f),
@@ -646,7 +808,7 @@ class CreatureView @JvmOverloads constructor(
                     vy = rng(-10f, -5f),
                     life = 1f,
                     size = rng(2f, 4f),
-                    color = Color.argb(80, 0xF5, 0x9E, 0x0B),
+                    color = Color.argb(80, 0x66, 0xBB, 0x6A),
                     type = ParticleType.SPARKLE
                 ))
             }

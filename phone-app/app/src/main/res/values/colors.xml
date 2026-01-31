@@ -4,9 +4,19 @@
     <color name="background_dark">#1a1a2e</color>
     <color name="background_surface">#252542</color>
 
-    <!-- Creature colors -->
-    <color name="creature_orange_light">#FBBF24</color>
-    <color name="creature_orange_dark">#D97706</color>
+    <!-- Creature colors - Troll/Goblin palette -->
+    <color name="creature_green_light">#A8D5A2</color>
+    <color name="creature_green_dark">#6B8E6B</color>
+    <!-- Backward compat aliases for launcher icons etc. -->
+    <color name="creature_orange_light">@color/creature_green_light</color>
+    <color name="creature_orange_dark">@color/creature_green_dark</color>
+
+    <!-- Troll horns -->
+    <color name="creature_horn_base">#C8A882</color>
+    <color name="creature_horn_inner">#E8B4B8</color>
+
+    <!-- Troll fur -->
+    <color name="creature_fur">#7A9A6A</color>
 
     <!-- Chat bubble colors -->
     <color name="chat_user_bubble">#0099FF</color>
@@ -20,11 +30,12 @@
     <color name="status_connecting">#FFC107</color>
 
     <!-- Creature enhanced features -->
-    <color name="creature_iris">#B8860B</color>
-    <color name="creature_iris_dark">#8B6508</color>
-    <color name="creature_glow_orange">#40F59E0B</color>
-    <color name="creature_glow_blue">#400099FF</color>
+    <color name="creature_iris">#E8B400</color>
+    <color name="creature_iris_dark">#B8860B</color>
     <color name="creature_glow_green">#404CAF50</color>
+    <color name="creature_glow_blue">#400099FF</color>
+    <color name="creature_glow_idle">#4066BB6A</color>
+    <color name="creature_glow_listening">#5066BB6A</color>
     <color name="creature_glow_purple">#309C27B0</color>
 
     <!-- Primary colors -->
