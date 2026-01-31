@@ -132,6 +132,28 @@
             android:focusable="true"
             android:visibility="gone" />
 
+        <!-- Disconnected overlay on chat area -->
+        <FrameLayout
+            android:id="@+id/disconnectedOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="48dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="4dp"
+                android:text="NOT CONNECTED"
+                android:textColor="#88FFFFFF"
+                android:textSize="8sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1" />
+
+        </FrameLayout>
+
         <!-- State indicator (RECORDING, THINKING, etc.) - overlays chat -->
         <TextView
             android:id="@+id/stateIndicator"

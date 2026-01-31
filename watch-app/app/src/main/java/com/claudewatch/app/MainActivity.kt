@@ -62,6 +62,9 @@ class MainActivity : Activity() {
     // State indicator
     private lateinit var stateIndicator: TextView
 
+    // Disconnected overlay
+    private lateinit var disconnectedOverlay: FrameLayout
+
     // Chat
     private lateinit var chatRecyclerView: WearableRecyclerView
     private lateinit var chatAdapter: WatchChatAdapter
@@ -118,6 +121,7 @@ class MainActivity : Activity() {
         stateIndicator = findViewById(R.id.stateIndicator)
 
         chatRecyclerView = findViewById(R.id.chatRecyclerView)
+        disconnectedOverlay = findViewById(R.id.disconnectedOverlay)
 
         promptOverlay = findViewById(R.id.promptOverlay)
         promptTitle = findViewById(R.id.promptTitle)
@@ -204,6 +208,19 @@ class MainActivity : Activity() {
             ConnectionStatus.DISCONNECTED -> android.R.color.holo_red_light
         }
         connectionDot.setBackgroundColor(ContextCompat.getColor(this, color))
+
+        // Show/hide disconnected overlay on chat
+        val isConnected = status == ConnectionStatus.CONNECTED
+        if (!isConnected) {
+            fadeIn(disconnectedOverlay)
+            chatRecyclerView.alpha = 0.4f
+        } else {
+            fadeOut(disconnectedOverlay)
+            chatRecyclerView.alpha = 1f
+        }
+
+        // Update record button enabled state
+        updateUIState()
     }
 
     private fun onClaudeStateChanged(state: ClaudeState) {
@@ -665,6 +682,7 @@ class MainActivity : Activity() {
 
     private fun updateUIState() {
         val claudeStatus = wsClient.claudeState.value.status
+        val isConnected = wsClient.connectionStatus.value == ConnectionStatus.CONNECTED
 
         // Update state indicator pill
         updateStateIndicator(claudeStatus)
@@ -685,6 +703,8 @@ class MainActivity : Activity() {
             isRecording -> {
                 recordButton.text = "Stop & Send"
                 recordButton.setBackgroundResource(R.drawable.round_button_red)
+                recordButton.isEnabled = true
+                recordButton.alpha = 1f
                 animateIn(recordButton)
                 animateOut(abortButton)
                 animateOut(audioControls)
@@ -697,9 +717,17 @@ class MainActivity : Activity() {
                 animateOut(doneButton)
             }
             else -> {
-                // Idle state
+                // Idle state - grey out if disconnected
                 recordButton.text = "Record"
-                recordButton.setBackgroundResource(R.drawable.round_button)
+                if (isConnected) {
+                    recordButton.setBackgroundResource(R.drawable.round_button)
+                    recordButton.isEnabled = true
+                    recordButton.alpha = 1f
+                } else {
+                    recordButton.setBackgroundResource(R.drawable.round_button_disabled)
+                    recordButton.isEnabled = false
+                    recordButton.alpha = 0.6f
+                }
                 animateIn(recordButton)
                 animateOut(abortButton)
                 animateOut(audioControls)
