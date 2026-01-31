@@ -26,19 +26,13 @@
             android:layout_height="0dp"
             android:visibility="gone" />
 
+        <!-- Settings button hidden (moved to bottom bar) -->
         <ImageButton
             android:id="@+id/settingsButton"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_gravity="top|end"
-            android:layout_marginTop="6dp"
-            android:layout_marginEnd="2dp"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:src="@drawable/ic_settings"
-            android:contentDescription="Settings"
-            android:tint="@android:color/darker_gray"
-            android:scaleType="fitCenter"
-            android:padding="2dp" />
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            android:contentDescription="Settings" />
 
         <!-- Chat RecyclerView in middle -->
         <androidx.wear.widget.WearableRecyclerView
@@ -51,19 +45,59 @@
             android:paddingTop="4dp"
             android:paddingBottom="48dp" />
 
-        <!-- Record button at bottom center -->
-        <TextView
-            android:id="@+id/recordButton"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
+        <!-- Bottom bar: settings, record, speaker -->
+        <LinearLayout
+            android:id="@+id/bottomBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:layout_gravity="bottom|center_horizontal"
-            android:text="Rec"
-            android:textSize="10sp"
-            android:textColor="@android:color/white"
-            android:background="@drawable/round_button"
-            android:gravity="center"
-            android:clickable="true"
-            android:focusable="true" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Settings button (left of record) -->
+            <ImageView
+                android:id="@+id/settingsButtonBottom"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:layout_marginEnd="8dp"
+                android:src="@drawable/ic_settings"
+                android:contentDescription="Settings"
+                android:tint="@android:color/darker_gray"
+                android:scaleType="centerInside"
+                android:padding="5dp"
+                android:background="@drawable/round_button_dark"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- Record button (center) -->
+            <TextView
+                android:id="@+id/recordButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:text="Rec"
+                android:textSize="10sp"
+                android:textColor="@android:color/white"
+                android:background="@drawable/round_button"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- Speaker toggle (right of record) -->
+            <ImageView
+                android:id="@+id/speakerToggle"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:layout_marginStart="8dp"
+                android:src="@drawable/ic_speaker"
+                android:contentDescription="Toggle voice response"
+                android:tint="#888888"
+                android:scaleType="centerInside"
+                android:padding="5dp"
+                android:background="@drawable/round_button_dark"
+                android:clickable="true"
+                android:focusable="true" />
+
+        </LinearLayout>
 
         <!-- Abort button at bottom center (hidden) -->
         <TextView

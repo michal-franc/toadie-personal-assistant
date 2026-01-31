@@ -308,7 +308,7 @@ def update_permission_step(claude_request_id: str, permission_request_id: str, u
 
 
 
-def run_claude(text: str, request_id: str = None):
+def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
     """Run Claude with a prompt using the JSON streaming wrapper."""
     global last_claude_launch, active_claude_wrapper
     now = time.time()
@@ -419,7 +419,7 @@ def run_claude(text: str, request_id: str = None):
                     })
 
             # Handle response based on mode
-            if response_config['mode'] == 'disabled':
+            if response_mode == 'disabled':
                 claude_responses[request_id] = {
                     'status': 'disabled',
                     'timestamp': datetime.now().isoformat()
@@ -438,7 +438,7 @@ def run_claude(text: str, request_id: str = None):
 
             # Generate TTS if audio mode
             audio_path = None
-            if response_config['mode'] == 'audio' and result:
+            if response_mode == 'audio' and result:
                 add_response_step(request_id, {
                     'name': 'tts_generating',
                     'label': 'Generating Audio',
@@ -460,7 +460,7 @@ def run_claude(text: str, request_id: str = None):
                 'label': 'Ready for Watch',
                 'status': 'completed',
                 'timestamp': datetime.now().isoformat(),
-                'details': f'Type: {response_config["mode"]}'
+                'details': f'Type: {response_mode}'
             })
 
             claude_responses[request_id] = {
@@ -646,8 +646,9 @@ class DictationHandler(BaseHTTPRequestHandler):
 
             # Step 4: Claude
             claude_at = datetime.now()
+            response_mode = self.headers.get('X-Response-Mode', 'text')
             if transcript:
-                launched = run_claude(transcript, request_id)
+                launched = run_claude(transcript, request_id, response_mode)
                 entry['claude_launched'] = launched
                 entry['status'] = 'completed'
                 entry['steps'].append({
@@ -674,8 +675,8 @@ class DictationHandler(BaseHTTPRequestHandler):
                 'status': 'ok',
                 'request_id': request_id,
                 'transcript': transcript or '',
-                'response_enabled': response_config['mode'] != 'disabled',
-                'response_mode': response_config['mode'],
+                'response_enabled': response_mode != 'disabled',
+                'response_mode': response_mode,
                 'message': 'No speech detected' if not transcript else None
             }).encode())
 
@@ -833,18 +834,6 @@ class DictationHandler(BaseHTTPRequestHandler):
         """Handle GET /api/response/<id> to check Claude's response"""
         request_id = self.path.split('/')[-1]
 
-        # Check if responses are disabled
-        if response_config['mode'] == 'disabled':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                'status': 'disabled',
-                'message': 'Responses are disabled on server'
-            }).encode())
-            return
-
         if request_id not in claude_responses:
             self.send_response(404)
             self.send_header('Content-Type', 'application/json')
@@ -982,7 +971,8 @@ class DictationHandler(BaseHTTPRequestHandler):
                 request_history.pop()
 
             # Launch Claude with the text
-            launched = run_claude(text, request_id)
+            response_mode = data.get('response_mode', 'text')
+            launched = run_claude(text, request_id, response_mode)
             entry['claude_launched'] = launched
 
             if launched:

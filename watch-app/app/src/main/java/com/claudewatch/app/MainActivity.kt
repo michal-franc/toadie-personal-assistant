@@ -16,6 +16,7 @@ import android.view.animation.OvershootInterpolator
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -53,6 +54,8 @@ class MainActivity : Activity() {
     private lateinit var pauseButton: TextView
     private lateinit var doneButton: TextView
     private lateinit var settingsButton: ImageButton
+    private lateinit var settingsButtonBottom: ImageView
+    private lateinit var speakerToggle: ImageView
     private lateinit var thinkingOverlay: FrameLayout
 
     // Connection bar
@@ -82,6 +85,7 @@ class MainActivity : Activity() {
     private var audioFile: File? = null
     private var isRecording = false
     private var isPlayingAudio = false
+    private var voiceResponseEnabled = false
     private var currentAudioFile: File? = null
     private var currentRequestId: String? = null
 
@@ -114,6 +118,8 @@ class MainActivity : Activity() {
         pauseButton = findViewById(R.id.pauseButton)
         doneButton = findViewById(R.id.doneButton)
         settingsButton = findViewById(R.id.settingsButton)
+        settingsButtonBottom = findViewById(R.id.settingsButtonBottom)
+        speakerToggle = findViewById(R.id.speakerToggle)
         thinkingOverlay = findViewById(R.id.thinkingOverlay)
 
         connectionDot = findViewById(R.id.connectionDot)
@@ -153,6 +159,26 @@ class MainActivity : Activity() {
         settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        settingsButtonBottom.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        // Load persisted voice response preference
+        val prefs = getSharedPreferences("ClaudeWatchPrefs", MODE_PRIVATE)
+        voiceResponseEnabled = prefs.getBoolean("voice_response_enabled", false)
+        updateSpeakerIcon()
+
+        speakerToggle.setOnClickListener {
+            voiceResponseEnabled = !voiceResponseEnabled
+            prefs.edit().putBoolean("voice_response_enabled", voiceResponseEnabled).apply()
+            updateSpeakerIcon()
+            vibrate(50)
+        }
+    }
+
+    private fun updateSpeakerIcon() {
+        val color = if (voiceResponseEnabled) "#0099FF" else "#888888"
+        speakerToggle.setColorFilter(android.graphics.Color.parseColor(color))
     }
 
     private fun setupWebSocket() {
@@ -182,8 +208,9 @@ class MainActivity : Activity() {
         coroutineScope.launch {
             wsClient.chatMessages.collectLatest { messages ->
                 chatAdapter.submitMessages(messages) {
-                    if (messages.isNotEmpty()) {
-                        chatRecyclerView.smoothScrollToPosition(chatAdapter.itemCount - 1)
+                    val count = chatAdapter.itemCount
+                    if (count > 0) {
+                        chatRecyclerView.smoothScrollToPosition(count - 1)
                     }
                 }
             }
@@ -508,9 +535,11 @@ class MainActivity : Activity() {
         return try {
             val serverUrl = SettingsActivity.getServerUrl(this@MainActivity)
             val requestBody = file.asRequestBody("audio/mp4".toMediaType())
+            val responseMode = if (voiceResponseEnabled) "audio" else "text"
 
             val request = Request.Builder()
                 .url(serverUrl)
+                .header("X-Response-Mode", responseMode)
                 .post(requestBody)
                 .build()
 
@@ -689,7 +718,7 @@ class MainActivity : Activity() {
 
         // Show thinking dots in chat
         chatAdapter.setThinking(claudeStatus == "thinking")
-        if (claudeStatus == "thinking") {
+        if (claudeStatus == "thinking" && chatAdapter.itemCount > 0) {
             chatRecyclerView.smoothScrollToPosition(chatAdapter.itemCount - 1)
         }
 
