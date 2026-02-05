@@ -1,168 +1,50 @@
-# Claude Watch - Wear OS App
+# Toadie — Wear OS Watch App
 
-Voice recording app for Galaxy Watch that sends audio to the claude-watch server and receives responses as text notifications or audio playback.
+Voice recording app for Galaxy Watch that sends audio to the server and receives responses as text or audio. Connects through the phone app via Wearable DataLayer — no direct server connection needed.
 
-## UI Mockup
-
-![Watch & Phone Mockup](../docs/watch-mockup.png)
-
-## UI Flow
-
-![Watch UI Flow](../docs/watch-mockups/00-flow-overview.svg)
-
-## Architecture
-
-![Watch App Architecture](../docs/watch-architecture.jpg)
-
-### Relay Connection
-
-The watch connects to the server through the phone app:
-
-```
-Watch ←→ Phone (DataLayer) ←→ Server (WebSocket)
-```
-
-- **RelayClient** on watch sends/receives via Wearable DataLayer
-- **PhoneRelayService** on phone forwards messages to server WebSocket
-- Real-time state updates flow back through the same path
+<p align="center">
+  <img src="../docs/watch-mockups/screenshots/watch-idle.png" width="200" alt="Idle with chat">
+  &nbsp;
+  <img src="../docs/watch-mockups/screenshots/watch-thinking.png" width="200" alt="Thinking">
+  &nbsp;
+  <img src="../docs/watch-mockups/screenshots/watch-response.png" width="200" alt="Response">
+</p>
 
 ## Features
 
-- One-tap recording start/stop
-- Connects to server through phone relay (Watch → Phone → Server)
-- Real-time state updates via WebSocket
-- Text notification display
-- Audio response playback with controls
-- Haptic feedback (vibration)
-- Wake lock during operations
-- Permission prompt handling
-- Configurable server settings (via phone app)
+- **One-tap Recording** — Tap to record, tap to send
+- **Real-time Chat** — View message history, scroll through conversations
+- **Permission Prompts** — Approve/deny Claude tool calls with haptic feedback
+- **Audio Playback** — Play/pause/replay TTS responses
+- **Phone Relay** — All traffic goes Watch &harr; Phone (Bluetooth) &harr; Server (WebSocket)
+- **Settings** — Configure server IP via phone app or on-watch settings
 
 ## States
 
-| State | UI | Actions |
-|-------|----|----|
-| Idle | "Record" button | Tap to start recording |
-| Recording | "Stop & Send" (red) | Tap to send; Abort to cancel |
-| Waiting | "Abort" + progress | Auto-polls for response; Tap to cancel |
-| Playing | Play/Pause, Replay, Done | Control audio playback |
-
-## Response Handling
-
-The app polls `/api/response/<id>` after sending audio:
-- **Polling interval:** 5 seconds
-- **Initial delay:** 1.5 seconds
-- **Max attempts:** 24 (2 minutes total)
-- **Wake lock:** Held for up to 3 minutes
-
-**Response modes:**
-- `text` - Shows notification with response text
-- `audio` - Downloads and plays MP3 audio
-- `disabled` - No response expected
+| State | UI | Action |
+|-------|-----|--------|
+| Idle | "Record" button | Tap to start |
+| Recording | "Stop & Send" (red) | Tap to send, or abort |
+| Thinking | "Abort" + spinner | Waiting for Claude |
+| Response | Chat message | Auto-scrolls to newest |
+| Permission | Allow/Deny overlay | Approve or block tool call |
 
 ## Setup
 
-### 1. Build
-
 ```bash
-cd watch-app
 ./gradlew assembleDebug
-```
-
-### 2. Install on Watch
-
-```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Or use Android Studio with watch connected via ADB over WiFi.
-
-### 3. Configure Server
-
-Long-press the app icon or access Settings:
-- **Server IP:** Your server's IP address (e.g., `192.168.1.100`)
-- **Server Port:** HTTP port (default: `5566`)
-
-## Usage
-
-1. **Tap "Record"** - Starts recording (button turns red)
-2. **Tap "Stop & Send"** - Stops recording and sends to server
-3. **Wait** - App polls for Claude's response
-4. **Receive** - Notification appears or audio plays
-
-**Cancel anytime:** Tap "Abort" during waiting phase
-
-## Endpoints Used
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/transcribe` | POST | Send audio recording |
-| `/api/response/<id>` | GET | Poll for response |
-| `/api/response/<id>/ack` | POST | Confirm receipt |
-| `/api/audio/<id>` | GET | Download audio response |
-| `/api/permission/respond` | POST | Send permission decision |
-| `ws://:5567/ws` | WebSocket | Real-time permission prompts |
-
-## Permission Prompts
-
-The watch connects via WebSocket to receive permission requests when Claude needs approval for sensitive operations.
-
-- **Allow** - Permit the operation (green button)
-- **Deny** - Block the operation (red button)
-
-Permission prompts show the tool name and action description. The watch vibrates when a prompt arrives.
-
-## Audio Format
-
-- **Format:** M4A (MPEG-4)
-- **Codec:** AAC
-- **Bitrate:** 128 kbps
-- **Sample rate:** 44.1 kHz
-
-Compatible with Deepgram API.
-
-## Permissions
-
-- `RECORD_AUDIO` - Voice recording
-- `INTERNET` - HTTP requests
-- `VIBRATE` - Haptic feedback
-- `WAKE_LOCK` - Keep awake during polling
-- `POST_NOTIFICATIONS` - Response notifications
-
-## Requirements
-
-- Galaxy Watch 4 or newer (Wear OS 3+)
-- Android SDK 30+ (minSdk)
-- Claude Companion phone app installed and connected
-- Phone must be on same network as server
-
-## Project Structure
-
-```
-watch-app/
-├── app/src/main/java/com/claudewatch/app/
-│   ├── MainActivity.kt           # Recording UI + state display
-│   ├── SettingsActivity.kt       # Server configuration
-│   └── relay/
-│       ├── RelayClient.kt        # DataLayer communication
-│       └── WatchWebSocketClient.kt # State management
-├── app/src/main/res/
-│   └── layout/
-│       ├── activity_main.xml
-│       └── activity_settings.xml
-├── app/src/test/                  # Unit tests
-└── build.gradle.kts
-```
+The watch doesn't need a server IP — just pair with the phone app. The phone handles the network connection.
 
 ## Testing
 
 ```bash
-# Run unit tests
 ./gradlew test
 ```
 
-Tests cover:
-- State management and transitions
-- Response parsing
-- URL construction
-- Polling configuration
+## Requirements
+
+- Galaxy Watch 4+ (Wear OS 3, API 30+)
+- Toadie phone app installed and paired

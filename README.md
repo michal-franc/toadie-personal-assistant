@@ -3,9 +3,13 @@
 Voice-to-Claude pipeline: Speak into your Galaxy Watch or phone (or just say "hey toadie"), Claude Code executes your command, and responses come back as text or TTS audio. Includes permission prompts for dangerous operations.
 
 <p align="center">
-  <img src="docs/phone-mockups/screenshots/wake-word-listening.png" width="280" alt="Wake word overlay - Listening">
-  &nbsp;&nbsp;
-  <img src="docs/phone-mockups/screenshots/creature-idle.png" width="280" alt="Main screen - Idle with chat">
+  <img src="docs/phone-mockups/screenshots/wake-word-listening.png" width="230" alt="Wake word overlay - Listening">
+  &nbsp;
+  <img src="docs/phone-mockups/screenshots/creature-idle.png" width="230" alt="Main screen - Idle with chat">
+  &nbsp;
+  <img src="docs/watch-mockups/screenshots/watch-idle.png" width="170" alt="Watch - Idle">
+  &nbsp;
+  <img src="docs/watch-mockups/screenshots/watch-thinking.png" width="170" alt="Watch - Thinking">
 </p>
 
 - **Wear OS Watch App** — Record voice commands from your wrist, view chat history, approve/deny Claude tool permissions
