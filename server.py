@@ -16,22 +16,20 @@ Endpoints:
 
 import argparse
 import asyncio
-import os
-import re
-import sys
-import socket
-import select
-import subprocess
-import threading
-import uuid
-import weakref
-from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
+import os
+import socket
+import sys
+import threading
+import time
+import uuid
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from aiohttp import web
 
-from logger import logger
 from claude_wrapper import ClaudeWrapper
+from logger import logger
 from tailscale_auth import verify_peer
 
 # Load Deepgram API key from environment (set via EnvironmentFile in systemd)
@@ -45,8 +43,6 @@ PORT = 5566
 client = DeepgramClient()
 
 # Guard against duplicate Claude launches
-import time
-from datetime import datetime
 last_claude_launch = 0
 LAUNCH_COOLDOWN = 5  # seconds
 
@@ -66,23 +62,18 @@ claude_responses = {}
 RESPONSE_TIMEOUT = 120  # seconds to keep response in memory
 
 # Transcription configuration (modifiable via API)
-transcription_config = {
-    'model': 'nova-3',
-    'language': 'en-US',
-    'smart_format': True,
-    'punctuate': True
-}
+transcription_config = {"model": "nova-3", "language": "en-US", "smart_format": True, "punctuate": True}
 
 # Response configuration
 response_config = {
-    'mode': 'disabled',  # 'text', 'audio', or 'disabled'
+    "mode": "disabled",  # 'text', 'audio', or 'disabled'
 }
 
 # Available options for configuration
 CONFIG_OPTIONS = {
-    'models': ['nova-3', 'nova-2', 'nova', 'enhanced', 'base'],
-    'languages': ['en-US', 'pl'],
-    'response_modes': ['text', 'audio', 'disabled']
+    "models": ["nova-3", "nova-2", "nova", "enhanced", "base"],
+    "languages": ["en-US", "pl"],
+    "response_modes": ["text", "audio", "disabled"],
 }
 
 # Directory for temporary audio files
@@ -93,7 +84,7 @@ os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
 claude_state = {
     "status": "idle",  # idle, listening, thinking, speaking
     "current_request_id": None,
-    "last_update": None
+    "last_update": None,
 }
 
 # Chat history (in-memory, last 50 messages)
@@ -147,34 +138,21 @@ def set_claude_state(status: str, request_id: str = None):
     claude_state["current_request_id"] = request_id
     claude_state["last_update"] = datetime.now().isoformat()
 
-    broadcast_message({
-        "type": "state",
-        "status": status,
-        "request_id": request_id
-    })
+    broadcast_message({"type": "state", "status": status, "request_id": request_id})
     logger.info(f"[STATE] Claude state: {status}")
 
 
 def add_chat_message(role: str, content: str):
     """Add a message to chat history and broadcast"""
-    message = {
-        "role": role,
-        "content": content,
-        "timestamp": datetime.now().isoformat()
-    }
+    message = {"role": role, "content": content, "timestamp": datetime.now().isoformat()}
     chat_history.append(message)
 
     # Trim to max size
     while len(chat_history) > MAX_CHAT_HISTORY:
         chat_history.pop(0)
 
-    broadcast_message({
-        "type": "chat",
-        **message
-    })
+    broadcast_message({"type": "chat", **message})
     logger.info(f"[CHAT] {role}: {content[:50]}...")
-
-
 
 
 def set_current_prompt(prompt: dict):
@@ -182,16 +160,11 @@ def set_current_prompt(prompt: dict):
     global current_prompt
     current_prompt = prompt
 
-    broadcast_message({
-        "type": "prompt",
-        "prompt": prompt
-    })
+    broadcast_message({"type": "prompt", "prompt": prompt})
     if prompt:
         logger.info(f"[PROMPT] {prompt['question']} ({len(prompt['options'])} options)")
     else:
         logger.info("[PROMPT] Cleared")
-
-
 
 
 def text_to_speech(text: str, request_id: str) -> str:
@@ -214,21 +187,21 @@ def text_to_speech(text: str, request_id: str) -> str:
                 f.write(f"Truncated to {MAX_TTS_CHARS} chars\n")
 
         # Use direct HTTP request to Deepgram TTS API
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
         headers = {
-            "Authorization": f"Token {api_key}",
+            "Authorization": f"Token {os.environ['DEEPGRAM_API_KEY']}",
             "Content-Type": "application/json",
         }
-        data = json.dumps({"text": text}).encode('utf-8')
+        data = json.dumps({"text": text}).encode("utf-8")
 
-        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=30) as response:
             audio_data = response.read()
 
-        with open(audio_path, 'wb') as f:
+        with open(audio_path, "wb") as f:
             f.write(audio_data)
 
         with open(log_file, "a") as f:
@@ -238,6 +211,7 @@ def text_to_speech(text: str, request_id: str) -> str:
         return audio_path
     except Exception as e:
         import traceback
+
         error_msg = traceback.format_exc()
         with open(log_file, "a") as f:
             f.write(f"Error: {e}\n")
@@ -251,14 +225,14 @@ def transcribe_audio(audio_data: bytes) -> str:
     """Transcribe m4a audio data using Deepgram (auto-detects format)"""
     response = client.listen.v1.media.transcribe_file(
         request=audio_data,
-        model=transcription_config['model'],
-        language=transcription_config['language'],
-        smart_format=transcription_config['smart_format'],
-        punctuate=transcription_config['punctuate'],
+        model=transcription_config["model"],
+        language=transcription_config["language"],
+        smart_format=transcription_config["smart_format"],
+        punctuate=transcription_config["punctuate"],
     )
 
     transcript = ""
-    if hasattr(response, 'results'):
+    if hasattr(response, "results"):
         channels = response.results.channels
         if channels and len(channels) > 0:
             alternatives = channels[0].alternatives
@@ -268,24 +242,22 @@ def transcribe_audio(audio_data: bytes) -> str:
     return transcript
 
 
-
-
 def add_response_step(request_id: str, step: dict):
     """Add a step to the request history for response tracking"""
     for entry in request_history:
-        if entry.get('request_id') == request_id:
-            if 'steps' not in entry:
-                entry['steps'] = []
-            entry['steps'].append(step)
+        if entry.get("request_id") == request_id:
+            if "steps" not in entry:
+                entry["steps"] = []
+            entry["steps"].append(step)
             break
 
 
 def update_response_step(request_id: str, step_name: str, updates: dict):
     """Update an existing step in the request history"""
     for entry in request_history:
-        if entry.get('request_id') == request_id:
-            for step in entry.get('steps', []):
-                if step.get('name') == step_name:
+        if entry.get("request_id") == request_id:
+            for step in entry.get("steps", []):
+                if step.get("name") == step_name:
                     step.update(updates)
                     break
             break
@@ -294,14 +266,12 @@ def update_response_step(request_id: str, step_name: str, updates: dict):
 def update_permission_step(claude_request_id: str, permission_request_id: str, updates: dict):
     """Update a permission step in request history by permission_request_id"""
     for entry in request_history:
-        if entry.get('request_id') == claude_request_id:
-            for step in entry.get('steps', []):
-                if step.get('permission_request_id') == permission_request_id:
+        if entry.get("request_id") == claude_request_id:
+            for step in entry.get("steps", []):
+                if step.get("permission_request_id") == permission_request_id:
                     step.update(updates)
                     break
             break
-
-
 
 
 def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
@@ -324,20 +294,23 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
 
     # Mark response as pending
     if request_id:
-        claude_responses[request_id] = {'status': 'pending', 'timestamp': datetime.now().isoformat()}
-        add_response_step(request_id, {
-            'name': 'claude_started',
-            'label': 'Claude Started',
-            'status': 'in_progress',
-            'timestamp': datetime.now().isoformat(),
-            'details': 'Running Claude with JSON streaming...'
-        })
+        claude_responses[request_id] = {"status": "pending", "timestamp": datetime.now().isoformat()}
+        add_response_step(
+            request_id,
+            {
+                "name": "claude_started",
+                "label": "Claude Started",
+                "status": "in_progress",
+                "timestamp": datetime.now().isoformat(),
+                "details": "Running Claude with JSON streaming...",
+            },
+        )
 
     def run_in_thread():
         global active_claude_wrapper
         try:
             # Get model from config if set
-            model = transcription_config.get('claude_model')
+            model = transcription_config.get("claude_model")
 
             # Use singleton wrapper for persistent process
             wrapper = ClaudeWrapper.get_instance(claude_workdir, model=model)
@@ -348,56 +321,46 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
             def on_text(text_chunk):
                 accumulated_text.append(text_chunk)
                 # Broadcast text chunk to WebSocket clients
-                broadcast_message({
-                    "type": "text_chunk",
-                    "request_id": request_id,
-                    "text": text_chunk
-                })
+                broadcast_message({"type": "text_chunk", "request_id": request_id, "text": text_chunk})
                 logger.debug(f"[CLAUDE] Text: {text_chunk[:50]}...")
 
             def on_tool(name, input_data):
                 logger.info(f"[CLAUDE] Tool: {name}")
-                broadcast_message({
-                    "type": "tool",
-                    "request_id": request_id,
-                    "tool": name
-                })
+                broadcast_message({"type": "tool", "request_id": request_id, "tool": name})
 
             def on_result(result):
                 logger.info(f"[CLAUDE] Result: {result[:100]}...")
 
             def on_usage(usage):
                 logger.info(f"[CLAUDE] Context: {usage['context_percent']}% ({usage['total_context']:,} tokens)")
-                broadcast_message({
-                    "type": "usage",
-                    "input_tokens": usage['input_tokens'],
-                    "output_tokens": usage['output_tokens'],
-                    "cache_read_tokens": usage['cache_read_tokens'],
-                    "cache_creation_tokens": usage['cache_creation_tokens'],
-                    "total_context": usage['total_context'],
-                    "context_window": usage['context_window'],
-                    "context_percent": usage['context_percent'],
-                    "cost_usd": usage['cost_usd']
-                })
+                broadcast_message(
+                    {
+                        "type": "usage",
+                        "input_tokens": usage["input_tokens"],
+                        "output_tokens": usage["output_tokens"],
+                        "cache_read_tokens": usage["cache_read_tokens"],
+                        "cache_creation_tokens": usage["cache_creation_tokens"],
+                        "total_context": usage["total_context"],
+                        "context_window": usage["context_window"],
+                        "context_percent": usage["context_percent"],
+                        "cost_usd": usage["cost_usd"],
+                    }
+                )
 
             # Run Claude
             result = wrapper.run(
-                text,
-                on_text=on_text,
-                on_tool=on_tool,
-                on_result=on_result,
-                on_usage=on_usage,
-                show_terminal=True
+                text, on_text=on_text, on_tool=on_tool, on_result=on_result, on_usage=on_usage, show_terminal=True
             )
 
             active_claude_wrapper = None
 
             # Update step
             if request_id:
-                update_response_step(request_id, 'claude_started', {
-                    'status': 'completed',
-                    'details': f'Claude finished ({len(result)} chars)'
-                })
+                update_response_step(
+                    request_id,
+                    "claude_started",
+                    {"status": "completed", "details": f"Claude finished ({len(result)} chars)"},
+                )
 
             # Add Claude's response to chat (broadcasts via WebSocket)
             if result:
@@ -406,64 +369,79 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                 # Track that the response was broadcast to connected devices
                 if request_id:
                     client_count = len(websocket_clients)
-                    add_response_step(request_id, {
-                        'name': 'response_broadcast',
-                        'label': 'Response Sent',
-                        'status': 'completed',
-                        'timestamp': datetime.now().isoformat(),
-                        'details': f'Broadcast to {client_count} client{"s" if client_count != 1 else ""} via WebSocket'
-                    })
+                    add_response_step(
+                        request_id,
+                        {
+                            "name": "response_broadcast",
+                            "label": "Response Sent",
+                            "status": "completed",
+                            "timestamp": datetime.now().isoformat(),
+                            "details": (
+                                f"Broadcast to {client_count} client{'s' if client_count != 1 else ''} via WebSocket"
+                            ),
+                        },
+                    )
 
             # Handle response based on mode
-            if response_mode == 'disabled':
-                claude_responses[request_id] = {
-                    'status': 'disabled',
-                    'timestamp': datetime.now().isoformat()
-                }
+            if response_mode == "disabled":
+                claude_responses[request_id] = {"status": "disabled", "timestamp": datetime.now().isoformat()}
                 set_claude_state("idle")
                 return
 
             # Add response captured step
-            add_response_step(request_id, {
-                'name': 'response_captured',
-                'label': 'Response Captured',
-                'status': 'completed',
-                'timestamp': datetime.now().isoformat(),
-                'details': result[:200] + ('...' if len(result) > 200 else '')
-            })
+            add_response_step(
+                request_id,
+                {
+                    "name": "response_captured",
+                    "label": "Response Captured",
+                    "status": "completed",
+                    "timestamp": datetime.now().isoformat(),
+                    "details": result[:200] + ("..." if len(result) > 200 else ""),
+                },
+            )
 
             # Generate TTS if audio mode
             audio_path = None
-            if response_mode == 'audio' and result:
-                add_response_step(request_id, {
-                    'name': 'tts_generating',
-                    'label': 'Generating Audio',
-                    'status': 'in_progress',
-                    'timestamp': datetime.now().isoformat(),
-                    'details': 'Sending to Deepgram TTS...'
-                })
+            if response_mode == "audio" and result:
+                add_response_step(
+                    request_id,
+                    {
+                        "name": "tts_generating",
+                        "label": "Generating Audio",
+                        "status": "in_progress",
+                        "timestamp": datetime.now().isoformat(),
+                        "details": "Sending to Deepgram TTS...",
+                    },
+                )
 
                 audio_path = text_to_speech(result, request_id)
 
-                update_response_step(request_id, 'tts_generating', {
-                    'status': 'completed' if audio_path else 'error',
-                    'details': 'Audio generated' if audio_path else 'TTS failed'
-                })
+                update_response_step(
+                    request_id,
+                    "tts_generating",
+                    {
+                        "status": "completed" if audio_path else "error",
+                        "details": "Audio generated" if audio_path else "TTS failed",
+                    },
+                )
 
             # Add final ready step
-            add_response_step(request_id, {
-                'name': 'response_ready',
-                'label': 'Ready for Watch',
-                'status': 'completed',
-                'timestamp': datetime.now().isoformat(),
-                'details': f'Type: {response_mode}'
-            })
+            add_response_step(
+                request_id,
+                {
+                    "name": "response_ready",
+                    "label": "Ready for Watch",
+                    "status": "completed",
+                    "timestamp": datetime.now().isoformat(),
+                    "details": f"Type: {response_mode}",
+                },
+            )
 
             claude_responses[request_id] = {
-                'status': 'completed',
-                'response': result,
-                'audio_path': audio_path,
-                'timestamp': datetime.now().isoformat()
+                "status": "completed",
+                "response": result,
+                "audio_path": audio_path,
+                "timestamp": datetime.now().isoformat(),
             }
 
             # Update state
@@ -480,21 +458,25 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
         except Exception as e:
             logger.error(f"[CLAUDE] Error: {e}")
             import traceback
+
             traceback.print_exc()
 
             if request_id:
                 claude_responses[request_id] = {
-                    'status': 'error',
-                    'error': str(e),
-                    'timestamp': datetime.now().isoformat()
+                    "status": "error",
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat(),
                 }
-                add_response_step(request_id, {
-                    'name': 'error',
-                    'label': 'Error',
-                    'status': 'error',
-                    'timestamp': datetime.now().isoformat(),
-                    'details': str(e)
-                })
+                add_response_step(
+                    request_id,
+                    {
+                        "name": "error",
+                        "label": "Error",
+                        "status": "error",
+                        "timestamp": datetime.now().isoformat(),
+                        "details": str(e),
+                    },
+                )
 
             set_claude_state("idle")
             active_claude_wrapper = None
@@ -509,22 +491,23 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
 class DictationHandler(BaseHTTPRequestHandler):
     def handle(self):
         # Peek at raw data before any parsing
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"[CONN] New connection from {self.client_address}")
         try:
             # Read first 500 bytes to debug
             self.connection.setblocking(0)
             import select
+
             ready = select.select([self.connection], [], [], 1.0)
             if ready[0]:
                 peek_data = self.connection.recv(500, socket.MSG_PEEK)
-                print(f"[RAW] First 500 bytes preview:")
+                print("[RAW] First 500 bytes preview:")
                 print(f"[RAW] Hex: {peek_data[:100].hex()}")
                 print(f"[RAW] Text: {peek_data[:200]}")
             self.connection.setblocking(1)
         except Exception as e:
             print(f"[DEBUG] Peek failed: {e}")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
         super().handle()
 
     def parse_request(self):
@@ -537,57 +520,57 @@ class DictationHandler(BaseHTTPRequestHandler):
     def send_json(self, status_code, data, cors=True):
         """Send a JSON response with standard headers"""
         self.send_response(status_code)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header("Content-Type", "application/json")
         if cors:
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
 
     def do_POST(self):
-        peer_ip = getattr(self, 'client_address', ('127.0.0.1',))[0]
+        peer_ip = getattr(self, "client_address", ("127.0.0.1",))[0]
         if not verify_peer(peer_ip):
             self.send_error(403, "Unauthorized Tailscale node")
             return
 
-        content_length = int(self.headers.get('Content-Length', 0))
-        content_type = self.headers.get('Content-Type', 'unknown')
+        content_length = int(self.headers.get("Content-Length", 0))
+        content_type = self.headers.get("Content-Type", "unknown")
 
         # Handle config update
-        if self.path == '/api/config':
+        if self.path == "/api/config":
             self.handle_config_update(content_length)
             return
 
         # Handle response acknowledgment from watch
-        if self.path.startswith('/api/response/') and self.path.endswith('/ack'):
+        if self.path.startswith("/api/response/") and self.path.endswith("/ack"):
             self.handle_response_ack()
             return
 
         # Handle text message from phone app
-        if self.path == '/api/message':
+        if self.path == "/api/message":
             self.handle_text_message(content_length)
             return
 
         # Handle prompt response (selecting an option)
-        if self.path == '/api/prompt/respond':
+        if self.path == "/api/prompt/respond":
             self.handle_prompt_respond(content_length)
             return
 
         # Handle Claude restart
-        if self.path == '/api/claude/restart':
+        if self.path == "/api/claude/restart":
             self.handle_claude_restart()
             return
 
         # Handle permission request from hook
-        if self.path == '/api/permission/request':
+        if self.path == "/api/permission/request":
             self.handle_permission_request(content_length)
             return
 
         # Handle permission response from mobile app
-        if self.path == '/api/permission/respond':
+        if self.path == "/api/permission/respond":
             self.handle_permission_respond(content_length)
             return
 
-        print(f"=== Incoming Request ===")
+        print("=== Incoming Request ===")
         print(f"Path: {self.path}")
         print(f"Content-Type: {content_type}")
         print(f"Content-Length: {content_length} bytes")
@@ -597,7 +580,7 @@ class DictationHandler(BaseHTTPRequestHandler):
         print(f"Received {len(audio_data)} bytes of audio data")
         if len(audio_data) > 0:
             print(f"First 20 bytes (hex): {audio_data[:20].hex()}")
-        print(f"========================")
+        print("========================")
 
         received_at = datetime.now()
         request_id = str(uuid.uuid4())[:8]  # Short unique ID
@@ -605,53 +588,57 @@ class DictationHandler(BaseHTTPRequestHandler):
         # Update state to listening (audio received, being transcribed)
         set_claude_state("listening", request_id)
         entry = {
-            'id': len(request_history) + 1,
-            'request_id': request_id,
-            'timestamp': received_at.isoformat(),
-            'input_type': 'voice',
-            'content_type': content_type,
-            'size_bytes': content_length,
-            'transcript': None,
-            'claude_launched': False,
-            'status': 'processing',
-            'error': None,
-            'steps': [
+            "id": len(request_history) + 1,
+            "request_id": request_id,
+            "timestamp": received_at.isoformat(),
+            "input_type": "voice",
+            "content_type": content_type,
+            "size_bytes": content_length,
+            "transcript": None,
+            "claude_launched": False,
+            "status": "processing",
+            "error": None,
+            "steps": [
                 {
-                    'name': 'received',
-                    'label': 'Watch',
-                    'status': 'completed',
-                    'timestamp': received_at.isoformat(),
-                    'details': f'{content_length} bytes, {content_type}'
+                    "name": "received",
+                    "label": "Watch",
+                    "status": "completed",
+                    "timestamp": received_at.isoformat(),
+                    "details": f"{content_length} bytes, {content_type}",
                 }
-            ]
+            ],
         }
 
         try:
             # Step 2: Sending to Deepgram
             sending_at = datetime.now()
-            entry['steps'].append({
-                'name': 'sending',
-                'label': 'Sent to Deepgram',
-                'status': 'completed',
-                'timestamp': sending_at.isoformat(),
-                'details': 'Audio sent to cloud'
-            })
+            entry["steps"].append(
+                {
+                    "name": "sending",
+                    "label": "Sent to Deepgram",
+                    "status": "completed",
+                    "timestamp": sending_at.isoformat(),
+                    "details": "Audio sent to cloud",
+                }
+            )
 
             transcript = transcribe_audio(audio_data)
             transcribed_at = datetime.now()
             print(f"Transcript: {transcript}")
-            entry['transcript'] = transcript or ''
+            entry["transcript"] = transcript or ""
 
             # Step 3: Transcribed
             duration_ms = int((transcribed_at - sending_at).total_seconds() * 1000)
-            entry['steps'].append({
-                'name': 'transcribed',
-                'label': 'Transcribed',
-                'status': 'completed',
-                'timestamp': transcribed_at.isoformat(),
-                'duration_ms': duration_ms,
-                'details': transcript if transcript else 'No speech detected'
-            })
+            entry["steps"].append(
+                {
+                    "name": "transcribed",
+                    "label": "Transcribed",
+                    "status": "completed",
+                    "timestamp": transcribed_at.isoformat(),
+                    "duration_ms": duration_ms,
+                    "details": transcript if transcript else "No speech detected",
+                }
+            )
 
             # Insert into history BEFORE launching Claude so run_claude()
             # can add steps (claude_started, permissions, etc.) to this entry
@@ -661,58 +648,68 @@ class DictationHandler(BaseHTTPRequestHandler):
 
             # Step 4: Claude
             claude_at = datetime.now()
-            response_mode = self.headers.get('X-Response-Mode', 'text')
+            response_mode = self.headers.get("X-Response-Mode", "text")
             if transcript:
                 launched = run_claude(transcript, request_id, response_mode)
-                entry['claude_launched'] = launched
-                entry['status'] = 'completed'
-                entry['steps'].append({
-                    'name': 'claude',
-                    'label': 'Claude',
-                    'status': 'completed' if launched else 'skipped',
-                    'timestamp': claude_at.isoformat(),
-                    'details': 'Launched' if launched else 'Skipped (duplicate)'
-                })
+                entry["claude_launched"] = launched
+                entry["status"] = "completed"
+                entry["steps"].append(
+                    {
+                        "name": "claude",
+                        "label": "Claude",
+                        "status": "completed" if launched else "skipped",
+                        "timestamp": claude_at.isoformat(),
+                        "details": "Launched" if launched else "Skipped (duplicate)",
+                    }
+                )
             else:
-                entry['status'] = 'no_speech'
-                entry['steps'].append({
-                    'name': 'claude',
-                    'label': 'Claude',
-                    'status': 'skipped',
-                    'timestamp': claude_at.isoformat(),
-                    'details': 'Skipped (no speech)'
-                })
+                entry["status"] = "no_speech"
+                entry["steps"].append(
+                    {
+                        "name": "claude",
+                        "label": "Claude",
+                        "status": "skipped",
+                        "timestamp": claude_at.isoformat(),
+                        "details": "Skipped (no speech)",
+                    }
+                )
 
-            self.send_json(200, {
-                'status': 'ok',
-                'request_id': request_id,
-                'transcript': transcript or '',
-                'response_enabled': response_mode != 'disabled',
-                'response_mode': response_mode,
-                'message': 'No speech detected' if not transcript else None
-            }, cors=False)
+            self.send_json(
+                200,
+                {
+                    "status": "ok",
+                    "request_id": request_id,
+                    "transcript": transcript or "",
+                    "response_enabled": response_mode != "disabled",
+                    "response_mode": response_mode,
+                    "message": "No speech detected" if not transcript else None,
+                },
+                cors=False,
+            )
 
         except Exception as e:
             print(f"Error: {e}")
             error_at = datetime.now()
-            entry['status'] = 'error'
-            entry['error'] = str(e)
+            entry["status"] = "error"
+            entry["error"] = str(e)
 
             # Mark current step as failed
-            if len(entry['steps']) > 0:
-                last_step = entry['steps'][-1]
-                if last_step['status'] != 'completed':
-                    last_step['status'] = 'error'
-                    last_step['error'] = str(e)
+            if len(entry["steps"]) > 0:
+                last_step = entry["steps"][-1]
+                if last_step["status"] != "completed":
+                    last_step["status"] = "error"
+                    last_step["error"] = str(e)
                 else:
                     # Error happened after last step
-                    entry['steps'].append({
-                        'name': 'error',
-                        'label': 'Error',
-                        'status': 'error',
-                        'timestamp': error_at.isoformat(),
-                        'details': str(e)
-                    })
+                    entry["steps"].append(
+                        {
+                            "name": "error",
+                            "label": "Error",
+                            "status": "error",
+                            "timestamp": error_at.isoformat(),
+                            "details": str(e),
+                        }
+                    )
 
             # Entry already in request_history (inserted before Claude launch)
             # If error happened before that insert (early in try block),
@@ -722,43 +719,31 @@ class DictationHandler(BaseHTTPRequestHandler):
                 if len(request_history) > MAX_HISTORY:
                     request_history.pop()
 
-            self.send_json(500, {
-                'status': 'error',
-                'message': str(e)
-            }, cors=False)
+            self.send_json(500, {"status": "error", "message": str(e)}, cors=False)
 
     def do_GET(self):
-        peer_ip = getattr(self, 'client_address', ('127.0.0.1',))[0]
+        peer_ip = getattr(self, "client_address", ("127.0.0.1",))[0]
         if not verify_peer(peer_ip):
             self.send_error(403, "Unauthorized Tailscale node")
             return
 
-        if self.path == '/health':
-            self.send_json(200, {'status': 'ok'}, cors=False)
-        elif self.path.startswith('/api/response/'):
+        if self.path == "/health":
+            self.send_json(200, {"status": "ok"}, cors=False)
+        elif self.path.startswith("/api/response/"):
             self.handle_response_check()
-        elif self.path.startswith('/api/permission/status/'):
+        elif self.path.startswith("/api/permission/status/"):
             self.handle_permission_status()
-        elif self.path.startswith('/api/audio/'):
+        elif self.path.startswith("/api/audio/"):
             self.handle_audio_file()
-        elif self.path == '/api/history':
-            self.send_json(200, {
-                'history': request_history,
-                'workdir': claude_workdir
-            })
-        elif self.path == '/api/config':
-            self.send_json(200, {
-                'config': transcription_config,
-                'response_config': response_config,
-                'options': CONFIG_OPTIONS
-            })
-        elif self.path == '/api/chat':
-            self.send_json(200, {
-                'messages': chat_history,
-                'state': claude_state,
-                'prompt': current_prompt
-            })
-        elif self.path == '/' or self.path == '/dashboard':
+        elif self.path == "/api/history":
+            self.send_json(200, {"history": request_history, "workdir": claude_workdir})
+        elif self.path == "/api/config":
+            self.send_json(
+                200, {"config": transcription_config, "response_config": response_config, "options": CONFIG_OPTIONS}
+            )
+        elif self.path == "/api/chat":
+            self.send_json(200, {"messages": chat_history, "state": claude_state, "prompt": current_prompt})
+        elif self.path == "/" or self.path == "/dashboard":
             self.serve_dashboard()
         else:
             self.send_response(404)
@@ -792,123 +777,114 @@ class DictationHandler(BaseHTTPRequestHandler):
             # Validate and update config
             errors = []
 
-            if 'model' in new_config:
-                if new_config['model'] in CONFIG_OPTIONS['models']:
-                    transcription_config['model'] = new_config['model']
+            if "model" in new_config:
+                if new_config["model"] in CONFIG_OPTIONS["models"]:
+                    transcription_config["model"] = new_config["model"]
                 else:
                     errors.append(f"Invalid model: {new_config['model']}")
 
-            if 'language' in new_config:
-                if new_config['language'] in CONFIG_OPTIONS['languages']:
-                    transcription_config['language'] = new_config['language']
+            if "language" in new_config:
+                if new_config["language"] in CONFIG_OPTIONS["languages"]:
+                    transcription_config["language"] = new_config["language"]
                 else:
                     errors.append(f"Invalid language: {new_config['language']}")
 
-            if 'smart_format' in new_config:
-                transcription_config['smart_format'] = bool(new_config['smart_format'])
+            if "smart_format" in new_config:
+                transcription_config["smart_format"] = bool(new_config["smart_format"])
 
-            if 'punctuate' in new_config:
-                transcription_config['punctuate'] = bool(new_config['punctuate'])
+            if "punctuate" in new_config:
+                transcription_config["punctuate"] = bool(new_config["punctuate"])
 
-            if 'response_mode' in new_config:
-                if new_config['response_mode'] in CONFIG_OPTIONS['response_modes']:
-                    response_config['mode'] = new_config['response_mode']
+            if "response_mode" in new_config:
+                if new_config["response_mode"] in CONFIG_OPTIONS["response_modes"]:
+                    response_config["mode"] = new_config["response_mode"]
                 else:
                     errors.append(f"Invalid response_mode: {new_config['response_mode']}")
 
             if errors:
-                self.send_json(400, {'status': 'error', 'errors': errors})
+                self.send_json(400, {"status": "error", "errors": errors})
             else:
                 print(f"[CONFIG] Updated: {transcription_config}, response: {response_config}")
-                self.send_json(200, {
-                    'status': 'ok',
-                    'config': transcription_config,
-                    'response_config': response_config
-                })
+                self.send_json(
+                    200, {"status": "ok", "config": transcription_config, "response_config": response_config}
+                )
 
         except json.JSONDecodeError as e:
-            self.send_json(400, {'status': 'error', 'message': f'Invalid JSON: {e}'})
+            self.send_json(400, {"status": "error", "message": f"Invalid JSON: {e}"})
 
     def handle_response_check(self):
         """Handle GET /api/response/<id> to check Claude's response"""
-        request_id = self.path.split('/')[-1]
+        request_id = self.path.split("/")[-1]
 
         if request_id not in claude_responses:
-            self.send_json(404, {
-                'status': 'not_found',
-                'message': 'Request ID not found'
-            })
+            self.send_json(404, {"status": "not_found", "message": "Request ID not found"})
             return
 
         response_data = claude_responses[request_id]
 
-        if response_data['status'] == 'pending':
-            self.send_json(200, {
-                'status': 'pending',
-                'message': 'Claude is still processing'
-            })
-        elif response_data['status'] == 'disabled':
-            self.send_json(200, {
-                'status': 'disabled',
-                'message': 'Responses were disabled'
-            })
+        if response_data["status"] == "pending":
+            self.send_json(200, {"status": "pending", "message": "Claude is still processing"})
+        elif response_data["status"] == "disabled":
+            self.send_json(200, {"status": "disabled", "message": "Responses were disabled"})
         else:
             # Response is ready
-            response_text = response_data.get('response', '')
-            audio_path = response_data.get('audio_path')
+            response_text = response_data.get("response", "")
+            audio_path = response_data.get("audio_path")
 
             # Note: actual delivery confirmation comes via POST /api/response/<id>/ack
 
             # Check response mode
             if audio_path and os.path.exists(audio_path):
-                self.send_json(200, {
-                    'status': 'completed',
-                    'type': 'audio',
-                    'response': response_text,
-                    'audio_url': f'/api/audio/{request_id}'
-                })
+                self.send_json(
+                    200,
+                    {
+                        "status": "completed",
+                        "type": "audio",
+                        "response": response_text,
+                        "audio_url": f"/api/audio/{request_id}",
+                    },
+                )
             else:
-                self.send_json(200, {
-                    'status': 'completed',
-                    'type': 'text',
-                    'response': response_text
-                })
+                self.send_json(200, {"status": "completed", "type": "text", "response": response_text})
 
     def handle_response_ack(self):
         """Handle POST /api/response/<id>/ack - watch confirms receipt"""
         # Extract request_id from path like /api/response/abc123/ack
-        parts = self.path.split('/')
+        parts = self.path.split("/")
         request_id = parts[3] if len(parts) >= 4 else ""
 
         if request_id not in claude_responses:
-            self.send_json(404, {'status': 'not_found'})
+            self.send_json(404, {"status": "not_found"})
             return
 
         response_data = claude_responses[request_id]
 
         # Mark as delivered (only once)
-        if not response_data.get('delivered'):
-            response_data['delivered'] = True
-            add_response_step(request_id, {
-                'name': 'watch_received',
-                'label': 'Watch Received',
-                'status': 'completed',
-                'timestamp': datetime.now().isoformat(),
-                'details': 'Confirmed by watch'
-            })
+        if not response_data.get("delivered"):
+            response_data["delivered"] = True
+            add_response_step(
+                request_id,
+                {
+                    "name": "watch_received",
+                    "label": "Watch Received",
+                    "status": "completed",
+                    "timestamp": datetime.now().isoformat(),
+                    "details": "Confirmed by watch",
+                },
+            )
             print(f"[ACK] Watch confirmed receipt for {request_id}")
 
-        self.send_json(200, {'status': 'ok'})
+        self.send_json(200, {"status": "ok"})
 
     def handle_text_message(self, content_length):
         """Handle POST /api/message for text messages from phone app"""
         try:
             body = self.rfile.read(content_length)
             data = json.loads(body.decode())
-            text = data.get('text', '').strip()
+            text = data.get("text", "").strip()
 
             if not text:
-                self.send_json(400, {'status': 'error', 'message': 'No text provided'})
+                self.send_json(400, {"status": "error", "message": "No text provided"})
                 return
 
             request_id = str(uuid.uuid4())[:8]
@@ -917,25 +893,25 @@ class DictationHandler(BaseHTTPRequestHandler):
 
             # Add to history
             entry = {
-                'id': len(request_history) + 1,
-                'request_id': request_id,
-                'timestamp': received_at.isoformat(),
-                'input_type': 'text',
-                'content_type': 'text/plain',
-                'size_bytes': len(text.encode()),
-                'transcript': text,
-                'claude_launched': False,
-                'status': 'processing',
-                'error': None,
-                'steps': [
+                "id": len(request_history) + 1,
+                "request_id": request_id,
+                "timestamp": received_at.isoformat(),
+                "input_type": "text",
+                "content_type": "text/plain",
+                "size_bytes": len(text.encode()),
+                "transcript": text,
+                "claude_launched": False,
+                "status": "processing",
+                "error": None,
+                "steps": [
                     {
-                        'name': 'received',
-                        'label': 'Phone',
-                        'status': 'completed',
-                        'timestamp': received_at.isoformat(),
-                        'details': f'Text message: {len(text)} chars'
+                        "name": "received",
+                        "label": "Phone",
+                        "status": "completed",
+                        "timestamp": received_at.isoformat(),
+                        "details": f"Text message: {len(text)} chars",
                     }
-                ]
+                ],
             }
 
             # Insert into history BEFORE launching Claude so run_claude()
@@ -945,31 +921,29 @@ class DictationHandler(BaseHTTPRequestHandler):
                 request_history.pop()
 
             # Launch Claude with the text
-            response_mode = data.get('response_mode', 'text')
+            response_mode = data.get("response_mode", "text")
             launched = run_claude(text, request_id, response_mode)
-            entry['claude_launched'] = launched
+            entry["claude_launched"] = launched
 
             if launched:
-                entry['status'] = 'completed'
-                entry['steps'].append({
-                    'name': 'claude',
-                    'label': 'Claude',
-                    'status': 'completed',
-                    'timestamp': datetime.now().isoformat(),
-                    'details': 'Command sent to Claude'
-                })
+                entry["status"] = "completed"
+                entry["steps"].append(
+                    {
+                        "name": "claude",
+                        "label": "Claude",
+                        "status": "completed",
+                        "timestamp": datetime.now().isoformat(),
+                        "details": "Command sent to Claude",
+                    }
+                )
             else:
-                entry['status'] = 'error'
-                entry['error'] = 'Failed to launch Claude'
+                entry["status"] = "error"
+                entry["error"] = "Failed to launch Claude"
 
-            self.send_json(200, {
-                'status': 'ok',
-                'request_id': request_id,
-                'launched': launched
-            })
+            self.send_json(200, {"status": "ok", "request_id": request_id, "launched": launched})
 
         except json.JSONDecodeError as e:
-            self.send_json(400, {'status': 'error', 'message': f'Invalid JSON: {e}'})
+            self.send_json(400, {"status": "error", "message": f"Invalid JSON: {e}"})
 
     def handle_prompt_respond(self, content_length):
         """Handle POST /api/prompt/respond to answer a permission prompt.
@@ -981,18 +955,15 @@ class DictationHandler(BaseHTTPRequestHandler):
         global current_prompt
         try:
             body = self.rfile.read(content_length)
-            data = json.loads(body.decode())
-            option_num = data.get('option')
-
+            json.loads(body.decode())  # validate JSON
             # Phase 1: Permission prompts are auto-accepted via --permission-mode acceptEdits
             # This endpoint is kept for future Phase 2 implementation
-            self.send_json(200, {
-                'status': 'ok',
-                'message': 'Permission handling disabled in Phase 1 (auto-accept mode)'
-            })
+            self.send_json(
+                200, {"status": "ok", "message": "Permission handling disabled in Phase 1 (auto-accept mode)"}
+            )
 
         except json.JSONDecodeError as e:
-            self.send_json(400, {'status': 'error', 'message': f'Invalid JSON: {e}'})
+            self.send_json(400, {"status": "error", "message": f"Invalid JSON: {e}"})
 
     def handle_permission_request(self, content_length):
         """Handle POST /api/permission/request from the permission hook."""
@@ -1000,9 +971,9 @@ class DictationHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_length)
             data = json.loads(body.decode())
 
-            tool_name = data.get('tool_name', '')
-            tool_input = data.get('tool_input', {})
-            tool_use_id = data.get('tool_use_id', '')
+            tool_name = data.get("tool_name", "")
+            tool_input = data.get("tool_input", {})
+            tool_use_id = data.get("tool_use_id", "")
 
             # Generate request ID
             request_id = str(uuid.uuid4())[:8]
@@ -1012,94 +983,95 @@ class DictationHandler(BaseHTTPRequestHandler):
 
             # Store pending permission
             pending_permissions[request_id] = {
-                'tool_name': tool_name,
-                'tool_input': tool_input,
-                'tool_use_id': tool_use_id,
-                'status': 'pending',
-                'decision': None,
-                'reason': None,
-                'timestamp': datetime.now().isoformat(),
-                'claude_request_id': claude_request_id
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "tool_use_id": tool_use_id,
+                "status": "pending",
+                "decision": None,
+                "reason": None,
+                "timestamp": datetime.now().isoformat(),
+                "claude_request_id": claude_request_id,
             }
 
             # Format prompt for mobile app
-            if tool_name == 'Bash':
-                command = tool_input.get('command', '')
-                description = tool_input.get('description', '')
+            if tool_name == "Bash":
+                command = tool_input.get("command", "")
+                description = tool_input.get("description", "")
                 question = f"Run command: {command}"
                 context = description
-            elif tool_name in ('Write', 'Edit'):
-                file_path = tool_input.get('file_path', '')
+            elif tool_name in ("Write", "Edit"):
+                file_path = tool_input.get("file_path", "")
                 question = f"{tool_name} file: {file_path}"
-                context = tool_input.get('content', tool_input.get('new_string', ''))[:200]
+                context = tool_input.get("content", tool_input.get("new_string", ""))[:200]
             else:
                 question = f"Execute {tool_name}"
                 context = json.dumps(tool_input)[:200]
 
             # Build prompt data
             prompt_data = {
-                'question': question,
-                'options': [
-                    {'num': 1, 'label': 'Allow', 'description': 'Permit this operation'},
-                    {'num': 2, 'label': 'Deny', 'description': 'Block this operation'},
+                "question": question,
+                "options": [
+                    {"num": 1, "label": "Allow", "description": "Permit this operation"},
+                    {"num": 2, "label": "Deny", "description": "Block this operation"},
                 ],
-                'timestamp': datetime.now().isoformat(),
-                'title': tool_name,
-                'context': context,
-                'request_id': request_id,
-                'tool_name': tool_name,
-                'isPermission': True
+                "timestamp": datetime.now().isoformat(),
+                "title": tool_name,
+                "context": context,
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "isPermission": True,
             }
 
             # Set current_prompt so polling clients (dashboard) see it
             set_current_prompt(prompt_data)
 
             # Also broadcast as permission type for WebSocket clients
-            broadcast_message({
-                'type': 'permission',
-                'request_id': request_id,
-                'tool_name': tool_name,
-                'question': question,
-                'context': context,
-                'options': [
-                    {'num': 1, 'label': 'Allow', 'description': 'Permit this operation'},
-                    {'num': 2, 'label': 'Deny', 'description': 'Block this operation'},
-                ]
-            })
+            broadcast_message(
+                {
+                    "type": "permission",
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "question": question,
+                    "context": context,
+                    "options": [
+                        {"num": 1, "label": "Allow", "description": "Permit this operation"},
+                        {"num": 2, "label": "Deny", "description": "Block this operation"},
+                    ],
+                }
+            )
 
             logger.info(f"[PERMISSION] Request {request_id}: {tool_name} - {question[:50]}...")
 
             # Add permission step to the current active request's workflow
             if claude_request_id:
-                add_response_step(claude_request_id, {
-                    'name': 'permission',
-                    'label': f'Permission: {tool_name}',
-                    'status': 'in_progress',
-                    'timestamp': datetime.now().isoformat(),
-                    'details': question,
-                    'permission_request_id': request_id
-                })
+                add_response_step(
+                    claude_request_id,
+                    {
+                        "name": "permission",
+                        "label": f"Permission: {tool_name}",
+                        "status": "in_progress",
+                        "timestamp": datetime.now().isoformat(),
+                        "details": question,
+                        "permission_request_id": request_id,
+                    },
+                )
 
-            self.send_json(200, {'status': 'ok', 'request_id': request_id})
+            self.send_json(200, {"status": "ok", "request_id": request_id})
 
         except Exception as e:
             logger.error(f"[PERMISSION] Request error: {e}")
-            self.send_json(500, {'status': 'error', 'message': str(e)})
+            self.send_json(500, {"status": "error", "message": str(e)})
 
     def handle_permission_status(self):
         """Handle GET /api/permission/status/<id> - hook polls for decision."""
-        request_id = self.path.split('/')[-1]
+        request_id = self.path.split("/")[-1]
 
         if request_id not in pending_permissions:
-            self.send_json(404, {'status': 'not_found'})
+            self.send_json(404, {"status": "not_found"})
             return
 
         perm = pending_permissions[request_id]
-        self.send_json(200, {
-            'status': perm['status'],
-            'decision': perm['decision'],
-            'reason': perm['reason']
-        })
+        self.send_json(200, {"status": perm["status"], "decision": perm["decision"], "reason": perm["reason"]})
 
     def handle_permission_respond(self, content_length):
         """Handle POST /api/permission/respond - mobile app approves/denies."""
@@ -1107,63 +1079,63 @@ class DictationHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_length)
             data = json.loads(body.decode())
 
-            request_id = data.get('request_id', '')
-            decision = data.get('decision', 'deny')  # 'allow' or 'deny'
-            reason = data.get('reason', '')
+            request_id = data.get("request_id", "")
+            decision = data.get("decision", "deny")  # 'allow' or 'deny'
+            reason = data.get("reason", "")
 
             if request_id not in pending_permissions:
-                self.send_json(404, {'status': 'not_found'})
+                self.send_json(404, {"status": "not_found"})
                 return
 
             # Update permission status
             perm = pending_permissions[request_id]
-            perm['status'] = 'resolved'
-            perm['decision'] = decision
-            perm['reason'] = reason
-            perm['resolved_at'] = datetime.now().isoformat()
+            perm["status"] = "resolved"
+            perm["decision"] = decision
+            perm["reason"] = reason
+            perm["resolved_at"] = datetime.now().isoformat()
 
             logger.info(f"[PERMISSION] Response {request_id}: {decision}")
 
             # Update the permission step in request history
-            claude_request_id = perm.get('claude_request_id')
+            claude_request_id = perm.get("claude_request_id")
             if claude_request_id:
-                requested_at = datetime.fromisoformat(perm['timestamp'])
+                requested_at = datetime.fromisoformat(perm["timestamp"])
                 resolved_at = datetime.now()
                 duration_ms = int((resolved_at - requested_at).total_seconds() * 1000)
-                tool_name = perm.get('tool_name', 'unknown')
-                update_permission_step(claude_request_id, request_id, {
-                    'status': 'completed' if decision == 'allow' else 'error',
-                    'details': f'{decision}: {tool_name}',
-                    'duration_ms': duration_ms
-                })
+                tool_name = perm.get("tool_name", "unknown")
+                update_permission_step(
+                    claude_request_id,
+                    request_id,
+                    {
+                        "status": "completed" if decision == "allow" else "error",
+                        "details": f"{decision}: {tool_name}",
+                        "duration_ms": duration_ms,
+                    },
+                )
 
             # Clear current_prompt if it matches this permission
-            if current_prompt and current_prompt.get('request_id') == request_id:
+            if current_prompt and current_prompt.get("request_id") == request_id:
                 set_current_prompt(None)
 
             # Broadcast resolution
-            broadcast_message({
-                'type': 'permission_resolved',
-                'request_id': request_id,
-                'decision': decision
-            })
+            broadcast_message({"type": "permission_resolved", "request_id": request_id, "decision": decision})
 
-            self.send_json(200, {'status': 'ok'})
+            self.send_json(200, {"status": "ok"})
 
         except Exception as e:
             logger.error(f"[PERMISSION] Response error: {e}")
-            self.send_json(500, {'status': 'error', 'message': str(e)})
+            self.send_json(500, {"status": "error", "message": str(e)})
 
     def handle_audio_file(self):
         """Serve audio file for a request"""
-        request_id = self.path.split('/')[-1]
+        request_id = self.path.split("/")[-1]
 
         if request_id not in claude_responses:
             self.send_response(404)
             self.end_headers()
             return
 
-        audio_path = claude_responses[request_id].get('audio_path')
+        audio_path = claude_responses[request_id].get("audio_path")
         if not audio_path or not os.path.exists(audio_path):
             self.send_response(404)
             self.end_headers()
@@ -1171,29 +1143,29 @@ class DictationHandler(BaseHTTPRequestHandler):
 
         # Serve the audio file
         self.send_response(200)
-        self.send_header('Content-Type', 'audio/mpeg')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        with open(audio_path, 'rb') as f:
+        self.send_header("Content-Type", "audio/mpeg")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        with open(audio_path, "rb") as f:
             audio_data = f.read()
-        self.send_header('Content-Length', str(len(audio_data)))
+        self.send_header("Content-Length", str(len(audio_data)))
         self.end_headers()
         self.wfile.write(audio_data)
 
     def serve_dashboard(self):
         """Serve the Vue.js dashboard"""
-        dashboard_path = os.path.join(os.path.dirname(__file__), 'dashboard.html')
+        dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
         try:
-            with open(dashboard_path, 'rb') as f:
+            with open(dashboard_path, "rb") as f:
                 content = f.read()
             self.send_response(200)
-            self.send_header('Content-Type', 'text/html')
+            self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(content)
         except FileNotFoundError:
             self.send_response(404)
-            self.send_header('Content-Type', 'text/plain')
+            self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(b'Dashboard not found')
+            self.wfile.write(b"Dashboard not found")
 
     def log_message(self, format, *args):
         print(f"[HTTP] {args[0]}")
@@ -1207,12 +1179,14 @@ def get_clients_list():
     """Get serializable list of connected clients"""
     clients = []
     for ws, info in websocket_clients.items():
-        clients.append({
-            "device_type": info["device_type"],
-            "device_id": info["device_id"],
-            "connected_at": info["connected_at"],
-            "ip": info["ip"],
-        })
+        clients.append(
+            {
+                "device_type": info["device_type"],
+                "device_id": info["device_id"],
+                "connected_at": info["connected_at"],
+                "ip": info["ip"],
+            }
+        )
     return clients
 
 
@@ -1252,15 +1226,10 @@ async def websocket_handler(request):
 
     # Send current state and chat history on connect
     try:
-        await ws.send_json({
-            "type": "state",
-            "status": claude_state["status"],
-            "request_id": claude_state.get("current_request_id")
-        })
-        await ws.send_json({
-            "type": "history",
-            "messages": chat_history
-        })
+        await ws.send_json(
+            {"type": "state", "status": claude_state["status"], "request_id": claude_state.get("current_request_id")}
+        )
+        await ws.send_json({"type": "history", "messages": chat_history})
     except Exception as e:
         logger.error(f"[WS] Error sending initial state: {e}")
 
@@ -1298,13 +1267,13 @@ async def start_websocket_server():
     ws_loop = asyncio.get_event_loop()
 
     app = web.Application()
-    app.router.add_get('/ws', websocket_handler)
-    app.router.add_get('/health', ws_health_handler)
-    app.router.add_get('/clients', ws_clients_handler)
+    app.router.add_get("/ws", websocket_handler)
+    app.router.add_get("/health", ws_health_handler)
+    app.router.add_get("/clients", ws_clients_handler)
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', WS_PORT)
+    site = web.TCPSite(runner, "0.0.0.0", WS_PORT)
     await site.start()
     print(f"WebSocket server listening on port {WS_PORT}")
     print(f"Connect via: ws://localhost:{WS_PORT}/ws")
@@ -1323,13 +1292,13 @@ def run_websocket_server():
 
 def check_hooks_configured(workdir: str):
     """Check if permission hooks are configured and warn if not."""
-    hook_script = os.path.join(os.path.dirname(__file__), 'permission_hook.py')
+    hook_script = os.path.join(os.path.dirname(__file__), "permission_hook.py")
 
     # Check project-level settings
-    project_settings = os.path.join(workdir, '.claude', 'settings.json')
+    project_settings = os.path.join(workdir, ".claude", "settings.json")
 
     # Check user-level settings
-    user_settings = os.path.expanduser('~/.claude/settings.json')
+    user_settings = os.path.expanduser("~/.claude/settings.json")
 
     hook_found = False
 
@@ -1338,11 +1307,11 @@ def check_hooks_configured(workdir: str):
             try:
                 with open(settings_path) as f:
                     settings = json.load(f)
-                hooks = settings.get('hooks', {}).get('PreToolUse', [])
+                hooks = settings.get("hooks", {}).get("PreToolUse", [])
                 for hook_config in hooks:
-                    hook_list = hook_config.get('hooks', [])
+                    hook_list = hook_config.get("hooks", [])
                     for h in hook_list:
-                        if 'permission_hook' in h.get('command', ''):
+                        if "permission_hook" in h.get("command", ""):
                             hook_found = True
                             print(f"[HOOKS] Permission hook found in {settings_path}")
                             break
@@ -1355,7 +1324,8 @@ def check_hooks_configured(workdir: str):
         print("=" * 60)
         print("Mobile app permission prompts will NOT work without hooks.")
         print(f"\nTo enable, create {project_settings} with:")
-        print('''
+        print(
+            '''
 {
   "hooks": {
     "PreToolUse": [
@@ -1364,7 +1334,9 @@ def check_hooks_configured(workdir: str):
         "hooks": [
           {
             "type": "command",
-            "command": "''' + hook_script + '''",
+            "command": "'''
+            + hook_script
+            + """",
             "timeout": 120
           }
         ]
@@ -1372,7 +1344,8 @@ def check_hooks_configured(workdir: str):
     ]
   }
 }
-''')
+"""
+        )
         print("=" * 60 + "\n")
 
     # Also check if hook script exists
@@ -1383,13 +1356,8 @@ def check_hooks_configured(workdir: str):
 def main():
     global claude_workdir
 
-    parser = argparse.ArgumentParser(
-        description="HTTP server that transcribes audio and launches Claude Code"
-    )
-    parser.add_argument(
-        "folder",
-        help="Directory where Claude Code will operate"
-    )
+    parser = argparse.ArgumentParser(description="HTTP server that transcribes audio and launches Claude Code")
+    parser.add_argument("folder", help="Directory where Claude Code will operate")
     args = parser.parse_args()
 
     # Validate and resolve the folder path
@@ -1407,7 +1375,7 @@ def main():
     ws_thread = threading.Thread(target=run_websocket_server, daemon=True)
     ws_thread.start()
 
-    server = HTTPServer(('0.0.0.0', PORT), DictationHandler)
+    server = HTTPServer(("0.0.0.0", PORT), DictationHandler)
     print(f"Dictation receiver listening on port {PORT}")
     print(f"Claude working directory: {claude_workdir}")
     print(f"Dashboard: http://localhost:{PORT}/")

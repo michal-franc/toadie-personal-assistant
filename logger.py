@@ -13,12 +13,12 @@ if not logger.handlers:
     # File handler - detailed logs
     fh = logging.FileHandler(LOG_FILE)
     fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 
     # Console handler - info and above
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter('[%(name)s] %(message)s'))
+    ch.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
 
     logger.addHandler(fh)
     logger.addHandler(ch)

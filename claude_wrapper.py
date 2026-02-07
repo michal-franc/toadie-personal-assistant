@@ -11,8 +11,8 @@ Uses bidirectional JSON streaming:
 
 import json
 import os
-import subprocess
 import select
+import subprocess
 import threading
 import time
 from typing import Callable, Optional
@@ -28,7 +28,7 @@ TERMINAL_LOG = "/tmp/claude-watch-output.log"
 class ClaudeWrapper:
     """Wrapper for running Claude with persistent stdin/stdout communication."""
 
-    _instance: Optional['ClaudeWrapper'] = None
+    _instance: Optional["ClaudeWrapper"] = None
     _lock = threading.Lock()
 
     def __init__(self, workdir: str, model: str = None):
@@ -52,7 +52,7 @@ class ClaudeWrapper:
         self.context_window: int = 200000  # Default for Claude
 
     @classmethod
-    def get_instance(cls, workdir: str, model: str = None) -> 'ClaudeWrapper':
+    def get_instance(cls, workdir: str, model: str = None) -> "ClaudeWrapper":
         """Get or create the singleton wrapper instance."""
         with cls._lock:
             if cls._instance is None or not cls._instance.is_alive():
@@ -69,14 +69,17 @@ class ClaudeWrapper:
             return
 
         cmd = [
-            'claude', '-p',
-            '--input-format', 'stream-json',
-            '--output-format', 'stream-json',
-            '--verbose'
+            "claude",
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
             # Note: No --permission-mode flag - permissions handled by PreToolUse hook
         ]
         if self.model:
-            cmd.extend(['--model', self.model])
+            cmd.extend(["--model", self.model])
 
         logger.info(f"[WRAPPER] Starting persistent Claude process: {' '.join(cmd)}")
 
@@ -85,7 +88,7 @@ class ClaudeWrapper:
 
         # Set environment marker so hooks know this is a server session
         env = os.environ.copy()
-        env['CLAUDE_WATCH_SESSION'] = '1'
+        env["CLAUDE_WATCH_SESSION"] = "1"
 
         self.process = subprocess.Popen(
             cmd,
@@ -95,7 +98,7 @@ class ClaudeWrapper:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            env=env
+            env=env,
         )
         self._running = True
         logger.info(f"[WRAPPER] Claude process started (PID: {self.process.pid})")
@@ -107,7 +110,7 @@ class ClaudeWrapper:
         on_tool: Optional[Callable[[str, dict], None]] = None,
         on_result: Optional[Callable[[str], None]] = None,
         on_usage: Optional[Callable[[dict], None]] = None,
-        show_terminal: bool = True
+        show_terminal: bool = True,
     ) -> str:
         """
         Send a prompt to Claude and stream the response.
@@ -134,30 +137,20 @@ class ClaudeWrapper:
                 self._write_to_log(f"\n--- New Request ---\n> {prompt}\n")
 
             # Send prompt as JSON message
-            msg = json.dumps({
-                'type': 'user',
-                'message': {
-                    'role': 'user',
-                    'content': prompt
-                }
-            })
+            msg = json.dumps({"type": "user", "message": {"role": "user", "content": prompt}})
 
             try:
-                self.process.stdin.write(msg + '\n')
+                self.process.stdin.write(msg + "\n")
                 self.process.stdin.flush()
             except BrokenPipeError:
                 logger.error("[WRAPPER] Broken pipe - restarting process")
                 self._restart_process()
-                self.process.stdin.write(msg + '\n')
+                self.process.stdin.write(msg + "\n")
                 self.process.stdin.flush()
 
             # Process output until we get a result
             result = self._process_output(
-                on_text=on_text,
-                on_tool=on_tool,
-                on_result=on_result,
-                on_usage=on_usage,
-                show_terminal=show_terminal
+                on_text=on_text, on_tool=on_tool, on_result=on_result, on_usage=on_usage, show_terminal=show_terminal
             )
 
             return result or ""
@@ -180,7 +173,7 @@ class ClaudeWrapper:
         on_result: Optional[Callable[[str], None]],
         on_usage: Optional[Callable[[dict], None]],
         show_terminal: bool,
-        timeout: float = 300  # 5 minute timeout
+        timeout: float = 300,  # 5 minute timeout
     ) -> Optional[str]:
         """Process JSON lines from Claude's stdout until result received."""
         result = None
@@ -217,82 +210,85 @@ class ClaudeWrapper:
                 logger.warning(f"[WRAPPER] Invalid JSON: {e} - {line[:100]}")
                 continue
 
-            msg_type = msg.get('type')
+            msg_type = msg.get("type")
 
-            if msg_type == 'system':
-                subtype = msg.get('subtype')
-                if subtype == 'init':
-                    self.session_id = msg.get('session_id')
+            if msg_type == "system":
+                subtype = msg.get("subtype")
+                if subtype == "init":
+                    self.session_id = msg.get("session_id")
                     logger.info(f"[WRAPPER] Session: {self.session_id}")
 
-            elif msg_type == 'assistant':
-                content = msg.get('message', {}).get('content', [])
+            elif msg_type == "assistant":
+                content = msg.get("message", {}).get("content", [])
                 for item in content:
-                    item_type = item.get('type')
+                    item_type = item.get("type")
 
-                    if item_type == 'text':
-                        text = item.get('text', '')
+                    if item_type == "text":
+                        text = item.get("text", "")
                         if text:
                             if on_text:
                                 on_text(text)
                             logger.debug(f"[WRAPPER] Text: {text[:100]}...")
 
-                    elif item_type == 'tool_use':
-                        tool_name = item.get('name', 'unknown')
-                        tool_input = item.get('input', {})
+                    elif item_type == "tool_use":
+                        tool_name = item.get("name", "unknown")
+                        tool_input = item.get("input", {})
                         if on_tool:
                             on_tool(tool_name, tool_input)
                         logger.debug(f"[WRAPPER] Tool: {tool_name}")
 
-            elif msg_type == 'user':
+            elif msg_type == "user":
                 # Tool results - logged for debugging
-                content = msg.get('message', {}).get('content', [])
+                content = msg.get("message", {}).get("content", [])
                 for item in content:
-                    if item.get('type') == 'tool_result':
-                        logger.debug(f"[WRAPPER] Tool result received")
+                    if item.get("type") == "tool_result":
+                        logger.debug("[WRAPPER] Tool result received")
 
-            elif msg_type == 'result':
-                subtype = msg.get('subtype')
-                result = msg.get('result', '')
+            elif msg_type == "result":
+                subtype = msg.get("subtype")
+                result = msg.get("result", "")
 
-                if subtype == 'success':
+                if subtype == "success":
                     logger.info(f"[WRAPPER] Success: {result[:100]}...")
-                elif subtype == 'error':
-                    error = msg.get('error', 'Unknown error')
+                elif subtype == "error":
+                    error = msg.get("error", "Unknown error")
                     logger.error(f"[WRAPPER] Error: {error}")
                     result = f"Error: {error}"
 
                 # Extract usage information
-                usage = msg.get('usage', {})
-                model_usage = msg.get('modelUsage', {})
-                total_cost = msg.get('total_cost_usd', 0)
+                usage = msg.get("usage", {})
+                model_usage = msg.get("modelUsage", {})
+                total_cost = msg.get("total_cost_usd", 0)
 
                 # Calculate total context tokens
-                input_tokens = usage.get('input_tokens', 0)
-                cache_read = usage.get('cache_read_input_tokens', 0)
-                cache_creation = usage.get('cache_creation_input_tokens', 0)
-                output_tokens = usage.get('output_tokens', 0)
+                input_tokens = usage.get("input_tokens", 0)
+                cache_read = usage.get("cache_read_input_tokens", 0)
+                cache_creation = usage.get("cache_creation_input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
                 total_context = input_tokens + cache_read + cache_creation
 
                 # Get context window from model usage
                 for model_info in model_usage.values():
-                    if 'contextWindow' in model_info:
-                        self.context_window = model_info['contextWindow']
+                    if "contextWindow" in model_info:
+                        self.context_window = model_info["contextWindow"]
                         break
 
                 self.last_usage = {
-                    'input_tokens': input_tokens,
-                    'output_tokens': output_tokens,
-                    'cache_read_tokens': cache_read,
-                    'cache_creation_tokens': cache_creation,
-                    'total_context': total_context,
-                    'context_window': self.context_window,
-                    'context_percent': round(total_context / self.context_window * 100, 1) if self.context_window > 0 else 0,
-                    'cost_usd': total_cost
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cache_read_tokens": cache_read,
+                    "cache_creation_tokens": cache_creation,
+                    "total_context": total_context,
+                    "context_window": self.context_window,
+                    "context_percent": (
+                        round(total_context / self.context_window * 100, 1) if self.context_window > 0 else 0
+                    ),
+                    "cost_usd": total_cost,
                 }
                 self.total_cost_usd += total_cost
 
-                logger.info(f"[WRAPPER] Context: {total_context:,}/{self.context_window:,} ({self.last_usage['context_percent']}%)")
+                ctx_pct = self.last_usage["context_percent"]
+                logger.info(f"[WRAPPER] Context: {total_context:,}/{self.context_window:,} ({ctx_pct}%)")
 
                 if on_usage:
                     on_usage(self.last_usage)
@@ -310,80 +306,83 @@ class ClaudeWrapper:
         """Format JSON line for human-readable terminal output."""
         try:
             msg = json.loads(json_line)
-            msg_type = msg.get('type')
+            msg_type = msg.get("type")
 
-            if msg_type == 'system':
-                subtype = msg.get('subtype', '')
+            if msg_type == "system":
+                subtype = msg.get("subtype", "")
                 return f"\033[36m━━━ [{subtype}] Session started ━━━\033[0m"
 
-            elif msg_type == 'assistant':
-                content = msg.get('message', {}).get('content', [])
+            elif msg_type == "assistant":
+                content = msg.get("message", {}).get("content", [])
                 parts = []
                 for item in content:
-                    if item.get('type') == 'text':
-                        text = item.get('text', '')
+                    if item.get("type") == "text":
+                        text = item.get("text", "")
                         if text:
                             # Wrap long text
                             parts.append(f"\033[37m{text}\033[0m")
-                    elif item.get('type') == 'tool_use':
-                        name = item.get('name', 'tool')
-                        tool_input = item.get('input', {})
+                    elif item.get("type") == "tool_use":
+                        name = item.get("name", "tool")
+                        tool_input = item.get("input", {})
 
                         # Format based on tool type
-                        if name == 'Bash':
-                            cmd = tool_input.get('command', '')
-                            desc = tool_input.get('description', '')
+                        if name == "Bash":
+                            cmd = tool_input.get("command", "")
+                            desc = tool_input.get("description", "")
                             parts.append(f"\n\033[33m┌─ BASH {'─' * 50}\033[0m")
                             if desc:
                                 parts.append(f"\033[33m│\033[0m \033[90m# {desc}\033[0m")
                             parts.append(f"\033[33m│\033[0m \033[93m$ {cmd}\033[0m")
                             parts.append(f"\033[33m└{'─' * 56}\033[0m")
-                        elif name == 'Write':
-                            path = tool_input.get('file_path', '')
-                            content_preview = tool_input.get('content', '')[:100]
+                        elif name == "Write":
+                            path = tool_input.get("file_path", "")
+                            content_preview = tool_input.get("content", "")[:100]
                             parts.append(f"\n\033[35m┌─ WRITE {'─' * 49}\033[0m")
                             parts.append(f"\033[35m│\033[0m {path}")
-                            parts.append(f"\033[35m│\033[0m \033[90m{content_preview}{'...' if len(tool_input.get('content', '')) > 100 else ''}\033[0m")
+                            ellipsis = "..." if len(tool_input.get("content", "")) > 100 else ""
+                            parts.append(f"\033[35m│\033[0m \033[90m{content_preview}{ellipsis}\033[0m")
                             parts.append(f"\033[35m└{'─' * 56}\033[0m")
-                        elif name == 'Edit':
-                            path = tool_input.get('file_path', '')
-                            old = tool_input.get('old_string', '')[:50]
-                            new = tool_input.get('new_string', '')[:50]
+                        elif name == "Edit":
+                            path = tool_input.get("file_path", "")
+                            old = tool_input.get("old_string", "")[:50]
+                            new = tool_input.get("new_string", "")[:50]
                             parts.append(f"\n\033[35m┌─ EDIT {'─' * 50}\033[0m")
                             parts.append(f"\033[35m│\033[0m {path}")
-                            parts.append(f"\033[35m│\033[0m \033[91m- {old}{'...' if len(tool_input.get('old_string', '')) > 50 else ''}\033[0m")
-                            parts.append(f"\033[35m│\033[0m \033[92m+ {new}{'...' if len(tool_input.get('new_string', '')) > 50 else ''}\033[0m")
+                            old_ellipsis = "..." if len(tool_input.get("old_string", "")) > 50 else ""
+                            new_ellipsis = "..." if len(tool_input.get("new_string", "")) > 50 else ""
+                            parts.append(f"\033[35m│\033[0m \033[91m- {old}{old_ellipsis}\033[0m")
+                            parts.append(f"\033[35m│\033[0m \033[92m+ {new}{new_ellipsis}\033[0m")
                             parts.append(f"\033[35m└{'─' * 56}\033[0m")
-                        elif name == 'Read':
-                            path = tool_input.get('file_path', '')
+                        elif name == "Read":
+                            path = tool_input.get("file_path", "")
                             parts.append(f"\033[36m[READ]\033[0m {path}")
-                        elif name == 'Glob':
-                            pattern = tool_input.get('pattern', '')
+                        elif name == "Glob":
+                            pattern = tool_input.get("pattern", "")
                             parts.append(f"\033[36m[GLOB]\033[0m {pattern}")
-                        elif name == 'Grep':
-                            pattern = tool_input.get('pattern', '')
+                        elif name == "Grep":
+                            pattern = tool_input.get("pattern", "")
                             parts.append(f"\033[36m[GREP]\033[0m {pattern}")
                         else:
                             parts.append(f"\033[33m[{name}]\033[0m")
 
-                return '\n'.join(parts) if parts else ''
+                return "\n".join(parts) if parts else ""
 
-            elif msg_type == 'user':
-                content = msg.get('message', {}).get('content', [])
+            elif msg_type == "user":
+                content = msg.get("message", {}).get("content", [])
                 parts = []
                 for item in content:
-                    if item.get('type') == 'tool_result':
-                        result_content = item.get('content', '')
-                        is_error = item.get('is_error', False)
+                    if item.get("type") == "tool_result":
+                        result_content = item.get("content", "")
+                        is_error = item.get("is_error", False)
 
                         if is_error:
                             parts.append(f"\033[91m┌─ ERROR {'─' * 49}\033[0m")
                             # Show first few lines of error
-                            lines = str(result_content).split('\n')[:5]
+                            lines = str(result_content).split("\n")[:5]
                             for line in lines:
                                 parts.append(f"\033[91m│\033[0m {line[:80]}")
-                            if len(str(result_content).split('\n')) > 5:
-                                parts.append(f"\033[91m│\033[0m ...")
+                            if len(str(result_content).split("\n")) > 5:
+                                parts.append("\033[91m│\033[0m ...")
                             parts.append(f"\033[91m└{'─' * 56}\033[0m")
                         else:
                             # Show brief result
@@ -391,37 +390,41 @@ class ClaudeWrapper:
                             if len(result_str) > 200:
                                 parts.append(f"\033[32m[✓ result]\033[0m {result_str[:200]}...")
                             elif result_str:
-                                lines = result_str.split('\n')[:3]
+                                lines = result_str.split("\n")[:3]
                                 if len(lines) == 1:
                                     parts.append(f"\033[32m[✓]\033[0m {lines[0][:100]}")
                                 else:
-                                    parts.append(f"\033[32m[✓ result]\033[0m")
+                                    parts.append("\033[32m[✓ result]\033[0m")
                                     for line in lines:
                                         parts.append(f"    {line[:80]}")
-                                    if len(result_str.split('\n')) > 3:
+                                    if len(result_str.split("\n")) > 3:
                                         parts.append("    ...")
                             else:
-                                parts.append(f"\033[32m[✓]\033[0m")
+                                parts.append("\033[32m[✓]\033[0m")
 
-                return '\n'.join(parts) if parts else ''
+                return "\n".join(parts) if parts else ""
 
-            elif msg_type == 'result':
-                result = msg.get('result', '')
-                usage = msg.get('usage', {})
-                cost = msg.get('total_cost_usd', 0)
+            elif msg_type == "result":
+                result = msg.get("result", "")
+                usage = msg.get("usage", {})
+                cost = msg.get("total_cost_usd", 0)
 
                 # Calculate context
-                total_ctx = usage.get('input_tokens', 0) + usage.get('cache_read_input_tokens', 0) + usage.get('cache_creation_input_tokens', 0)
+                total_ctx = (
+                    usage.get("input_tokens", 0)
+                    + usage.get("cache_read_input_tokens", 0)
+                    + usage.get("cache_creation_input_tokens", 0)
+                )
 
-                output = [f"\n\033[32m━━━ DONE ━━━\033[0m"]
+                output = ["\n\033[32m━━━ DONE ━━━\033[0m"]
                 if result:
                     # Show first 300 chars of result
-                    preview = result[:300].replace('\n', ' ')
+                    preview = result[:300].replace("\n", " ")
                     output.append(f"\033[37m{preview}{'...' if len(result) > 300 else ''}\033[0m")
                 output.append(f"\033[90mContext: {total_ctx:,} tokens | Cost: ${cost:.4f}\033[0m")
-                return '\n'.join(output)
+                return "\n".join(output)
 
-            return ''
+            return ""
 
         except json.JSONDecodeError:
             return json_line
@@ -429,33 +432,38 @@ class ClaudeWrapper:
     def _ensure_tmux_session(self):
         """Ensure tmux session exists for output display."""
         # Check if session exists
-        result = subprocess.run(
-            ['tmux', 'has-session', '-t', TMUX_SESSION],
-            capture_output=True
-        )
+        result = subprocess.run(["tmux", "has-session", "-t", TMUX_SESSION], capture_output=True)
 
         if result.returncode != 0:
             # Initialize log file with header
-            with open(TERMINAL_LOG, 'w') as f:
+            with open(TERMINAL_LOG, "w") as f:
                 f.write("=== Claude Watch Output ===\n")
                 f.write(f"Working dir: {self.workdir}\n")
                 f.write("=" * 30 + "\n\n")
 
             # Create new session running tail -f on the log
-            subprocess.run([
-                'tmux', 'new-session',
-                '-d',  # detached
-                '-s', TMUX_SESSION,
-                '-c', self.workdir,
-                'tail', '-f', TERMINAL_LOG
-            ], check=False)
+            subprocess.run(
+                [
+                    "tmux",
+                    "new-session",
+                    "-d",  # detached
+                    "-s",
+                    TMUX_SESSION,
+                    "-c",
+                    self.workdir,
+                    "tail",
+                    "-f",
+                    TERMINAL_LOG,
+                ],
+                check=False,
+            )
             logger.info(f"[WRAPPER] Created tmux session '{TMUX_SESSION}' (attach with: tmux attach -t {TMUX_SESSION})")
 
     def _write_to_log(self, text: str):
         """Write text to the terminal log file."""
         try:
-            with open(TERMINAL_LOG, 'a') as f:
-                f.write(text + '\n')
+            with open(TERMINAL_LOG, "a") as f:
+                f.write(text + "\n")
         except Exception as e:
             logger.debug(f"[WRAPPER] log write error: {e}")
 

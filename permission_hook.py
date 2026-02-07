@@ -10,8 +10,8 @@ import json
 import os
 import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
 # Server configuration
 SERVER_HOST = "localhost"
@@ -25,8 +25,19 @@ SENSITIVE_TOOLS = {"Bash", "Write", "Edit", "NotebookEdit"}
 # Patterns that are auto-approved (safe operations)
 AUTO_APPROVE_PATTERNS = {
     "Bash": [
-        "ls ", "cat ", "head ", "tail ", "grep ", "find ", "echo ",
-        "pwd", "whoami", "date", "which ", "type ", "file ",
+        "ls ",
+        "cat ",
+        "head ",
+        "tail ",
+        "grep ",
+        "find ",
+        "echo ",
+        "pwd",
+        "whoami",
+        "date",
+        "which ",
+        "type ",
+        "file ",
     ],
     "Read": True,  # Always auto-approve reads
     "Glob": True,
@@ -60,10 +71,7 @@ def request_permission(tool_name: str, tool_input: dict, tool_use_id: str) -> di
     # Send request
     try:
         req = urllib.request.Request(
-            url,
-            data=json.dumps(request_data).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST"
+            url, data=json.dumps(request_data).encode(), headers={"Content-Type": "application/json"}, method="POST"
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             result = json.loads(resp.read().decode())
@@ -97,7 +105,7 @@ def request_permission(tool_name: str, tool_input: dict, tool_use_id: str) -> di
 
 def main():
     # Check for bypass mode
-    if os.environ.get('CLAUDE_SKIP_HOOKS') == '1':
+    if os.environ.get("CLAUDE_SKIP_HOOKS") == "1":
         sys.exit(0)  # Auto-approve everything
 
     # Read hook input from stdin
@@ -107,9 +115,9 @@ def main():
         sys.exit(0)  # No input, allow by default
 
     # For manual sessions (not server-spawned), let Claude show terminal prompt
-    if os.environ.get('CLAUDE_WATCH_SESSION') != '1':
-        tool_name = data.get('tool_name', '')
-        tool_input = data.get('tool_input', {})
+    if os.environ.get("CLAUDE_WATCH_SESSION") != "1":
+        tool_name = data.get("tool_name", "")
+        tool_input = data.get("tool_input", {})
 
         # Auto-approve safe operations
         if is_safe_operation(tool_name, tool_input):
@@ -120,7 +128,7 @@ def main():
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "ask",
-                "permissionDecisionReason": "Manual session - confirm in terminal"
+                "permissionDecisionReason": "Manual session - confirm in terminal",
             }
         }
         print(json.dumps(output))
@@ -141,7 +149,7 @@ def main():
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
-                "permissionDecisionReason": "Auto-approved safe operation"
+                "permissionDecisionReason": "Auto-approved safe operation",
             }
         }
         print(json.dumps(output))
@@ -154,7 +162,7 @@ def main():
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": result["decision"],
-            "permissionDecisionReason": result.get("reason", "")
+            "permissionDecisionReason": result.get("reason", ""),
         }
     }
     print(json.dumps(output))

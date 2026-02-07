@@ -9,11 +9,11 @@ Configuration:
     If not set or empty, verification is disabled (all connections allowed).
 """
 
+import http.client
 import json
 import os
 import socket
 import time
-import http.client
 
 from logger import logger
 

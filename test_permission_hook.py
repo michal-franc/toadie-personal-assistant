@@ -2,9 +2,9 @@
 
 import json
 import os
-import sys
 from io import StringIO
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 # Import the module functions
@@ -66,20 +66,20 @@ class TestIsSafeOperation:
 class TestMainBypassMode:
     """Tests for bypass mode via environment variable"""
 
-    @patch.dict(os.environ, {'CLAUDE_SKIP_HOOKS': '1'})
+    @patch.dict(os.environ, {"CLAUDE_SKIP_HOOKS": "1"})
     def test_skip_hooks_env_exits_zero(self):
         """Should exit 0 when CLAUDE_SKIP_HOOKS=1"""
-        with patch('sys.stdin', StringIO('{}')):
+        with patch("sys.stdin", StringIO("{}")):
             with pytest.raises(SystemExit) as exc_info:
                 permission_hook.main()
             assert exc_info.value.code == 0
 
-    @patch.dict(os.environ, {'CLAUDE_SKIP_HOOKS': '0'}, clear=False)
+    @patch.dict(os.environ, {"CLAUDE_SKIP_HOOKS": "0"}, clear=False)
     def test_skip_hooks_zero_continues(self):
         """Should not skip when CLAUDE_SKIP_HOOKS=0"""
         # This should continue to process, not exit early
-        with patch('sys.stdin', StringIO('{"tool_name": "Read", "tool_input": {}}')):
-            with patch.dict(os.environ, {'CLAUDE_WATCH_SESSION': '1'}):
+        with patch("sys.stdin", StringIO('{"tool_name": "Read", "tool_input": {}}')):
+            with patch.dict(os.environ, {"CLAUDE_WATCH_SESSION": "1"}):
                 with pytest.raises(SystemExit) as exc_info:
                     permission_hook.main()
                 # Should exit 0 because Read is safe
@@ -92,11 +92,8 @@ class TestMainManualSession:
     @patch.dict(os.environ, {}, clear=True)
     def test_manual_session_safe_op_auto_approve(self):
         """Manual session with safe op should auto-approve"""
-        input_data = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "ls -la"}
-        }
-        with patch('sys.stdin', StringIO(json.dumps(input_data))):
+        input_data = {"tool_name": "Bash", "tool_input": {"command": "ls -la"}}
+        with patch("sys.stdin", StringIO(json.dumps(input_data))):
             with pytest.raises(SystemExit) as exc_info:
                 permission_hook.main()
             assert exc_info.value.code == 0
@@ -104,101 +101,88 @@ class TestMainManualSession:
     @patch.dict(os.environ, {}, clear=True)
     def test_manual_session_unsafe_op_returns_ask(self):
         """Manual session with unsafe op should return 'ask'"""
-        input_data = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "rm -rf /tmp/test"}
-        }
+        input_data = {"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/test"}}
         captured_output = StringIO()
 
-        with patch('sys.stdin', StringIO(json.dumps(input_data))):
-            with patch('sys.stdout', captured_output):
+        with patch("sys.stdin", StringIO(json.dumps(input_data))):
+            with patch("sys.stdout", captured_output):
                 with pytest.raises(SystemExit) as exc_info:
                     permission_hook.main()
 
         assert exc_info.value.code == 0
         output = json.loads(captured_output.getvalue())
-        assert output['hookSpecificOutput']['permissionDecision'] == 'ask'
+        assert output["hookSpecificOutput"]["permissionDecision"] == "ask"
 
 
 class TestMainServerSession:
     """Tests for server-spawned session (CLAUDE_WATCH_SESSION=1)"""
 
-    @patch.dict(os.environ, {'CLAUDE_WATCH_SESSION': '1'})
+    @patch.dict(os.environ, {"CLAUDE_WATCH_SESSION": "1"})
     def test_server_session_safe_op_auto_approve(self):
         """Server session with safe op should auto-approve"""
-        input_data = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "ls -la"}
-        }
+        input_data = {"tool_name": "Bash", "tool_input": {"command": "ls -la"}}
         captured_output = StringIO()
 
-        with patch('sys.stdin', StringIO(json.dumps(input_data))):
-            with patch('sys.stdout', captured_output):
+        with patch("sys.stdin", StringIO(json.dumps(input_data))):
+            with patch("sys.stdout", captured_output):
                 with pytest.raises(SystemExit) as exc_info:
                     permission_hook.main()
 
         assert exc_info.value.code == 0
         output = json.loads(captured_output.getvalue())
-        assert output['hookSpecificOutput']['permissionDecision'] == 'allow'
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
 
-    @patch.dict(os.environ, {'CLAUDE_WATCH_SESSION': '1'})
-    @patch('permission_hook.request_permission')
+    @patch.dict(os.environ, {"CLAUDE_WATCH_SESSION": "1"})
+    @patch("permission_hook.request_permission")
     def test_server_session_unsafe_op_requests_permission(self, mock_request):
         """Server session with unsafe op should request permission from server"""
-        mock_request.return_value = {'decision': 'allow', 'reason': 'User approved'}
+        mock_request.return_value = {"decision": "allow", "reason": "User approved"}
 
-        input_data = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "rm -rf /tmp/test"},
-            "tool_use_id": "test123"
-        }
+        input_data = {"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/test"}, "tool_use_id": "test123"}
         captured_output = StringIO()
 
-        with patch('sys.stdin', StringIO(json.dumps(input_data))):
-            with patch('sys.stdout', captured_output):
+        with patch("sys.stdin", StringIO(json.dumps(input_data))):
+            with patch("sys.stdout", captured_output):
                 with pytest.raises(SystemExit) as exc_info:
                     permission_hook.main()
 
         assert exc_info.value.code == 0
         mock_request.assert_called_once()
         output = json.loads(captured_output.getvalue())
-        assert output['hookSpecificOutput']['permissionDecision'] == 'allow'
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
 
-    @patch.dict(os.environ, {'CLAUDE_WATCH_SESSION': '1'})
-    @patch('permission_hook.request_permission')
+    @patch.dict(os.environ, {"CLAUDE_WATCH_SESSION": "1"})
+    @patch("permission_hook.request_permission")
     def test_server_session_denied(self, mock_request):
         """Server session denied should return deny"""
-        mock_request.return_value = {'decision': 'deny', 'reason': 'User denied'}
+        mock_request.return_value = {"decision": "deny", "reason": "User denied"}
 
         input_data = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/etc/passwd", "content": "bad"},
-            "tool_use_id": "test456"
+            "tool_use_id": "test456",
         }
         captured_output = StringIO()
 
-        with patch('sys.stdin', StringIO(json.dumps(input_data))):
-            with patch('sys.stdout', captured_output):
+        with patch("sys.stdin", StringIO(json.dumps(input_data))):
+            with patch("sys.stdout", captured_output):
                 with pytest.raises(SystemExit) as exc_info:
                     permission_hook.main()
 
         assert exc_info.value.code == 0
         output = json.loads(captured_output.getvalue())
-        assert output['hookSpecificOutput']['permissionDecision'] == 'deny'
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 class TestMainNonSensitiveTools:
     """Tests for non-sensitive tools"""
 
-    @patch.dict(os.environ, {'CLAUDE_WATCH_SESSION': '1'})
+    @patch.dict(os.environ, {"CLAUDE_WATCH_SESSION": "1"})
     def test_non_sensitive_tool_auto_approve(self):
         """Non-sensitive tools should auto-approve without server"""
-        input_data = {
-            "tool_name": "WebSearch",
-            "tool_input": {"query": "python tutorial"}
-        }
+        input_data = {"tool_name": "WebSearch", "tool_input": {"query": "python tutorial"}}
 
-        with patch('sys.stdin', StringIO(json.dumps(input_data))):
+        with patch("sys.stdin", StringIO(json.dumps(input_data))):
             with pytest.raises(SystemExit) as exc_info:
                 permission_hook.main()
 
@@ -209,18 +193,18 @@ class TestMainNonSensitiveTools:
 class TestMainInvalidInput:
     """Tests for invalid input handling"""
 
-    @patch.dict(os.environ, {'CLAUDE_WATCH_SESSION': '1'})
+    @patch.dict(os.environ, {"CLAUDE_WATCH_SESSION": "1"})
     def test_invalid_json_exits_zero(self):
         """Invalid JSON should exit 0 (allow by default)"""
-        with patch('sys.stdin', StringIO('not valid json')):
+        with patch("sys.stdin", StringIO("not valid json")):
             with pytest.raises(SystemExit) as exc_info:
                 permission_hook.main()
             assert exc_info.value.code == 0
 
-    @patch.dict(os.environ, {'CLAUDE_WATCH_SESSION': '1'})
+    @patch.dict(os.environ, {"CLAUDE_WATCH_SESSION": "1"})
     def test_empty_input_exits_zero(self):
         """Empty input should exit 0"""
-        with patch('sys.stdin', StringIO('')):
+        with patch("sys.stdin", StringIO("")):
             with pytest.raises(SystemExit) as exc_info:
                 permission_hook.main()
             assert exc_info.value.code == 0
@@ -229,7 +213,7 @@ class TestMainInvalidInput:
 class TestRequestPermission:
     """Tests for request_permission function"""
 
-    @patch('permission_hook.urllib.request.urlopen')
+    @patch("permission_hook.urllib.request.urlopen")
     def test_request_sends_correct_data(self, mock_urlopen):
         """Should send tool info to server"""
         # Mock initial request
@@ -248,21 +232,21 @@ class TestRequestPermission:
 
         result = permission_hook.request_permission("Bash", {"command": "rm test"}, "tool123")
 
-        assert result['decision'] == 'allow'
+        assert result["decision"] == "allow"
 
-    @patch('permission_hook.urllib.request.urlopen')
+    @patch("permission_hook.urllib.request.urlopen")
     def test_request_server_unavailable_denies(self, mock_urlopen):
         """Should deny when server is unavailable"""
         mock_urlopen.side_effect = Exception("Connection refused")
 
         result = permission_hook.request_permission("Bash", {"command": "rm test"}, "tool123")
 
-        assert result['decision'] == 'deny'
-        assert 'unavailable' in result['reason'].lower()
+        assert result["decision"] == "deny"
+        assert "unavailable" in result["reason"].lower()
 
-    @patch('permission_hook.urllib.request.urlopen')
-    @patch('permission_hook.time.time')
-    @patch('permission_hook.time.sleep')
+    @patch("permission_hook.urllib.request.urlopen")
+    @patch("permission_hook.time.time")
+    @patch("permission_hook.time.sleep")
     def test_request_timeout_denies(self, mock_sleep, mock_time, mock_urlopen):
         """Should deny when request times out"""
         # Mock initial request
@@ -284,5 +268,5 @@ class TestRequestPermission:
 
         result = permission_hook.request_permission("Bash", {"command": "rm test"}, "tool123")
 
-        assert result['decision'] == 'deny'
-        assert 'timed out' in result['reason'].lower()
+        assert result["decision"] == "deny"
+        assert "timed out" in result["reason"].lower()
