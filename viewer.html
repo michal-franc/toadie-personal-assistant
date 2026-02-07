@@ -16,60 +16,6 @@
       overflow-x: hidden;
     }
 
-    /* Connect Screen */
-    .connect-screen {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      padding: 20px;
-    }
-    .connect-title {
-      font-size: 1.8rem;
-      font-weight: 700;
-      margin-bottom: 8px;
-    }
-    .connect-subtitle {
-      color: #888;
-      margin-bottom: 32px;
-      font-size: 0.9rem;
-    }
-    .connect-form {
-      display: flex;
-      gap: 8px;
-      width: 100%;
-      max-width: 500px;
-    }
-    .connect-form input {
-      flex: 1;
-      padding: 10px 14px;
-      background: #252540;
-      border: 1px solid #333;
-      border-radius: 6px;
-      color: #eee;
-      font-size: 0.95rem;
-      font-family: monospace;
-    }
-    .connect-form input:focus { outline: none; border-color: #4ade80; }
-    .connect-form button {
-      padding: 10px 20px;
-      background: #166534;
-      color: #4ade80;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 0.95rem;
-      font-weight: 600;
-      white-space: nowrap;
-    }
-    .connect-form button:hover { background: #15803d; }
-    .connect-error {
-      color: #f87171;
-      font-size: 0.85rem;
-      margin-top: 12px;
-    }
-
     /* Main Layout */
     .viewer {
       display: flex;
@@ -282,29 +228,8 @@
 </head>
 <body>
   <div id="app">
-    <!-- Connect Screen -->
-    <div v-if="!connected && !connecting" class="connect-screen">
-      <div class="connect-title">Toadie Viewer</div>
-      <div class="connect-subtitle">Connect to a Claude Watch server to watch live</div>
-      <div class="connect-form">
-        <input
-          v-model="wsUrl"
-          placeholder="ws://localhost:5567/ws"
-          @keyup.enter="connect"
-        >
-        <button @click="connect">Connect</button>
-      </div>
-      <div v-if="connectError" class="connect-error">{{ connectError }}</div>
-    </div>
-
-    <!-- Connecting -->
-    <div v-if="connecting && !connected" class="connect-screen">
-      <div class="connect-title">Connecting...</div>
-      <div class="connect-subtitle">{{ wsUrl }}</div>
-    </div>
-
     <!-- Main Viewer -->
-    <div v-if="connected" class="viewer">
+    <div class="viewer">
       <div class="status-bar">
         <span class="ws-dot" :class="wsAlive ? 'connected' : 'disconnected'"></span>
         <span class="state-badge" :class="creatureState.toLowerCase()">{{ creatureState }}</span>
@@ -1007,11 +932,8 @@
     createApp({
       setup() {
         // Connection
-        const wsUrl = ref(localStorage.getItem('viewer_ws_url') || 'ws://localhost:5567/ws')
-        const connected = ref(false)
-        const connecting = ref(false)
+        const wsUrl = 'wss://toadie.mfranc.com/ws'
         const wsAlive = ref(false)
-        const connectError = ref('')
 
         // State
         const creatureState = ref('OFFLINE')
@@ -1030,12 +952,6 @@
         let reconnectDelay = 1000
         let reconnectTimer = null
 
-        // Auto-connect from URL param
-        const urlParams = new URLSearchParams(window.location.search)
-        const wsParam = urlParams.get('ws')
-        if (wsParam) {
-          wsUrl.value = wsParam
-        }
 
         function formatTime(iso) {
           if (!iso) return ''
@@ -1125,26 +1041,17 @@
             ws.close()
           }
 
-          connecting.value = true
-          connectError.value = ''
-
-          const url = wsUrl.value + (wsUrl.value.includes('?') ? '&' : '?') +
-            'device=viewer&id=viewer-' + Math.random().toString(36).slice(2, 8)
+          const url = wsUrl + '?device=viewer&id=viewer-' + Math.random().toString(36).slice(2, 8)
 
           try {
             ws = new WebSocket(url)
           } catch (e) {
-            connecting.value = false
-            connectError.value = 'Invalid WebSocket URL'
             return
           }
 
           ws.onopen = () => {
-            connecting.value = false
-            connected.value = true
             wsAlive.value = true
             reconnectDelay = 1000
-            localStorage.setItem('viewer_ws_url', wsUrl.value)
 
             // Init creature renderer after canvas is mounted
             nextTick(() => {
@@ -1166,18 +1073,12 @@
 
           ws.onclose = () => {
             wsAlive.value = false
-            if (connected.value) {
-              // Was connected, set creature to offline and try to reconnect
-              creatureState.value = 'OFFLINE'
-              if (renderer) renderer.setState('OFFLINE')
-              reconnectTimer = setTimeout(() => {
-                reconnectDelay = Math.min(reconnectDelay * 1.5, 15000)
-                connectWs()
-              }, reconnectDelay)
-            } else {
-              connecting.value = false
-              connectError.value = 'Connection failed'
-            }
+            creatureState.value = 'OFFLINE'
+            if (renderer) renderer.setState('OFFLINE')
+            reconnectTimer = setTimeout(() => {
+              reconnectDelay = Math.min(reconnectDelay * 1.5, 15000)
+              connectWs()
+            }, reconnectDelay)
           }
 
           ws.onerror = () => {
@@ -1185,16 +1086,8 @@
           }
         }
 
-        function connect() {
-          if (!wsUrl.value) return
-          connectWs()
-        }
-
-        // Auto-connect if ws param provided
         onMounted(() => {
-          if (wsParam) {
-            connect()
-          }
+          connectWs()
         })
 
         onUnmounted(() => {
@@ -1204,11 +1097,11 @@
         })
 
         return {
-          wsUrl, connected, connecting, wsAlive, connectError,
+          wsAlive,
           creatureState, chatMessages, streamingText,
           toolBadges, usage,
           creatureCanvas, chatContainer,
-          connect, formatTime
+          formatTime
         }
       }
     }).mount('#app')
