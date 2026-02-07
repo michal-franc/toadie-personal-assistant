@@ -650,7 +650,7 @@
       </div>
       <div style="display: flex; align-items: center; gap: 12px;">
         <div class="workdir" v-if="workdir">{{ workdir }}</div>
-        <a href="/viewer.html" target="_blank" class="settings-btn" style="text-decoration: none;">
+        <a href="/viewer" target="_blank" class="settings-btn" style="text-decoration: none;">
           <span>&#128065;</span> Viewer
         </a>
         <button class="settings-btn" @click="openSettings">
@@ -688,54 +688,6 @@
         <label for="autoRefresh">Auto-refresh</label>
       </div>
       <button class="refresh-btn" @click="fetchHistory">Refresh</button>
-    </div>
-
-    <!-- Chat Section -->
-    <div class="chat-section">
-      <div class="chat-header">
-        <div class="chat-title">
-          <span>Session Chat</span>
-          <span class="chat-state" :class="chatState.status">{{ chatState.status }}</span>
-        </div>
-        <span style="font-size: 0.75rem; color: #666;">{{ chatMessages.length }} messages</span>
-      </div>
-      <div class="chat-messages" ref="chatContainer">
-        <div v-if="chatMessages.length === 0 && !currentPrompt" class="chat-empty">
-          No messages yet. Send a voice command to start.
-        </div>
-        <div
-          v-for="(msg, index) in chatMessages"
-          :key="index"
-          class="chat-message"
-          :class="msg.role"
-        >
-          <div class="chat-message-role">{{ msg.role }}</div>
-          <div class="chat-message-content">{{ msg.content }}</div>
-          <div class="chat-message-time">{{ formatTime(msg.timestamp) }}</div>
-        </div>
-
-        <!-- Permission Prompt -->
-        <div v-if="currentPrompt" class="prompt-box">
-          <div v-if="currentPrompt.title" class="prompt-title">{{ currentPrompt.title }}</div>
-          <div v-if="currentPrompt.context" class="prompt-context">{{ currentPrompt.context }}</div>
-          <div class="prompt-question">{{ currentPrompt.question }}</div>
-          <div class="prompt-options">
-            <div
-              v-for="opt in currentPrompt.options"
-              :key="opt.num"
-              class="prompt-option"
-              :class="{ selected: opt.selected }"
-              @click="respondToPrompt(opt.num)"
-            >
-              <div class="prompt-option-header">
-                <span class="prompt-option-num">{{ opt.num }}</span>
-                <span class="prompt-option-label">{{ opt.label }}</span>
-              </div>
-              <div v-if="opt.description" class="prompt-option-desc">{{ opt.description }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <div class="section-title">Request History</div>

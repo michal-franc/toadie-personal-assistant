@@ -745,6 +745,8 @@ class DictationHandler(BaseHTTPRequestHandler):
             self.send_json(200, {"messages": chat_history, "state": claude_state, "prompt": current_prompt})
         elif self.path == "/" or self.path == "/dashboard":
             self.serve_dashboard()
+        elif self.path == "/viewer":
+            self.serve_viewer()
         else:
             self.send_response(404)
             self.end_headers()
@@ -1150,6 +1152,22 @@ class DictationHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(audio_data)))
         self.end_headers()
         self.wfile.write(audio_data)
+
+    def serve_viewer(self):
+        """Serve the public demo viewer"""
+        viewer_path = os.path.join(os.path.dirname(__file__), "viewer.html")
+        try:
+            with open(viewer_path, "rb") as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(content)
+        except FileNotFoundError:
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Viewer not found")
 
     def serve_dashboard(self):
         """Serve the Vue.js dashboard"""
