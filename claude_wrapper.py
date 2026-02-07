@@ -18,6 +18,7 @@ import time
 from typing import Callable, Optional
 
 from logger import logger
+from transcript_reader import read_context_usage
 
 # Tmux session name for terminal output
 TMUX_SESSION = "claude-watch"
@@ -256,22 +257,36 @@ class ClaudeWrapper:
                     result = f"Error: {error}"
 
                 # Extract usage information
-                usage = msg.get("usage", {})
                 model_usage = msg.get("modelUsage", {})
                 total_cost = msg.get("total_cost_usd", 0)
-
-                # Calculate total context tokens
-                input_tokens = usage.get("input_tokens", 0)
-                cache_read = usage.get("cache_read_input_tokens", 0)
-                cache_creation = usage.get("cache_creation_input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
-                total_context = input_tokens + cache_read + cache_creation
 
                 # Get context window from model usage
                 for model_info in model_usage.values():
                     if "contextWindow" in model_info:
                         self.context_window = model_info["contextWindow"]
                         break
+
+                # Try transcript for accurate per-turn usage (avoids cumulative over-count)
+                transcript_usage = None
+                if self.session_id:
+                    transcript_usage = read_context_usage(self.workdir, self.session_id)
+
+                if transcript_usage:
+                    input_tokens = transcript_usage["input_tokens"]
+                    cache_read = transcript_usage["cache_read_input_tokens"]
+                    cache_creation = transcript_usage["cache_creation_input_tokens"]
+                    output_tokens = transcript_usage["output_tokens"]
+                    logger.debug("[WRAPPER] Using transcript for context usage")
+                else:
+                    # Fallback to result message usage (cumulative, may over-count)
+                    usage = msg.get("usage", {})
+                    input_tokens = usage.get("input_tokens", 0)
+                    cache_read = usage.get("cache_read_input_tokens", 0)
+                    cache_creation = usage.get("cache_creation_input_tokens", 0)
+                    output_tokens = usage.get("output_tokens", 0)
+                    logger.debug("[WRAPPER] Falling back to result message for context usage")
+
+                total_context = input_tokens + cache_read + cache_creation
 
                 self.last_usage = {
                     "input_tokens": input_tokens,
