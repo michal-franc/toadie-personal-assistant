@@ -20,6 +20,7 @@ Voice-to-Claude pipeline: Speak into your Galaxy Watch or phone (or just say "he
 - **Permission System** — Dangerous tool calls (Bash, file writes) require approval from your watch or phone before Claude can proceed
 - **Web Dashboard** — Vue.js control panel for monitoring Claude state, chat history, transcription settings, and permission prompts
 - **Remote Access** — Works over [Tailscale](https://tailscale.com/) so you can talk to Claude from anywhere, not just your local network
+- **Public Viewer** — Share a read-only live view via [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) — visitors see the animated creature, live chat, and Claude's state in real-time, protected by Cloudflare Access email OTP
 
 <p align="center">
   <img src="web_ui.jpg" width="600" alt="Web Dashboard">
@@ -33,6 +34,8 @@ Watch &rarr; Phone (Bluetooth/DataLayer) &rarr; Server (HTTP + WebSocket) &rarr;
 
 The watch has no direct network connection — all traffic relays through the paired phone via the Wearable DataLayer API.
 
+For public access, a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) exposes only `/viewer` and `/ws` through `cloudflared` path-based ingress, with Cloudflare Access email OTP as the auth layer.
+
 ![Phone Relay Architecture](docs/phone-relay-architecture.jpg)
 
 ## Setup
@@ -42,7 +45,7 @@ The watch has no direct network connection — all traffic relays through the pa
 pip install deepgram-sdk aiohttp
 
 # Deepgram API key
-echo "your-api-key" > /tmp/deepgram_api_key
+export DEEPGRAM_API_KEY="your-api-key"
 
 # Start server (pass your project directory)
 ./server.py /path/to/your/project
@@ -73,10 +76,10 @@ curl http://localhost:5566/health  # Health check
 - [Tailscale Peer Verification](docs/features/tailscale-auth.md) — Access control using Tailscale node identity
 - [Security: Defense in Depth](docs/features/security.md) — Multiple overlapping security layers
 - [Hardware Button Quick Record](docs/features/hardware-button-record.md) — Double-press a hardware button to start recording on the watch
+- [Public Viewer via Cloudflare Tunnel](docs/features/public-viewer-tunnel.md) — Share a read-only live view of Claude sessions with anyone
 
 ## Troubleshooting
 
-- **400 Bad Request** — Use `http://` not `https://`
 - **No transcript** — Check Deepgram API key, verify audio format (m4a, wav, mp3)
 - **Claude not responding** — Check `tmux attach -t claude-watch` or `tail -f /tmp/claude-watch.log`
 - **Permission prompts missing** — Ensure phone app is connected via WebSocket
