@@ -274,6 +274,61 @@ def update_permission_step(claude_request_id: str, permission_request_id: str, u
             break
 
 
+def init_claude_wrapper():
+    """Initialize the Claude wrapper with global callbacks and start the background watcher.
+
+    Global callbacks broadcast all activity to WebSocket clients, regardless of
+    whether the prompt came from the server or was typed directly in tmux.
+    """
+    model = transcription_config.get("claude_model")
+    wrapper = ClaudeWrapper.get_instance(claude_workdir, model=model)
+
+    def on_text(text_chunk):
+        req_id = claude_state.get("current_request_id")
+        broadcast_message({"type": "text_chunk", "request_id": req_id, "text": text_chunk})
+
+    def on_tool(name, input_data):
+        req_id = claude_state.get("current_request_id")
+        broadcast_message({"type": "tool", "request_id": req_id, "tool": name})
+
+    def on_user_message(text):
+        """Handle user messages from tmux-typed prompts (not server-initiated)."""
+        add_chat_message("user", text)
+        set_claude_state("thinking")
+
+    def on_usage(usage):
+        broadcast_message(
+            {
+                "type": "usage",
+                "input_tokens": usage["input_tokens"],
+                "output_tokens": usage["output_tokens"],
+                "cache_read_tokens": usage["cache_read_tokens"],
+                "cache_creation_tokens": usage["cache_creation_tokens"],
+                "total_context": usage["total_context"],
+                "context_window": usage["context_window"],
+                "context_percent": usage["context_percent"],
+                "cost_usd": usage["cost_usd"],
+            }
+        )
+
+    def on_turn_complete(result, server_initiated):
+        """For tmux-typed prompts, add response to chat and return to idle."""
+        if not server_initiated and result:
+            add_chat_message("claude", result)
+            set_claude_state("idle")
+
+    wrapper.register_callbacks(
+        on_text=on_text,
+        on_tool=on_tool,
+        on_user_message=on_user_message,
+        on_usage=on_usage,
+        on_turn_complete=on_turn_complete,
+    )
+    wrapper.start_background_watcher()
+    logger.info("[SERVER] Claude wrapper initialized with background watcher")
+    return wrapper
+
+
 def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
     """Run Claude with a prompt using the JSON streaming wrapper."""
     global last_claude_launch, active_claude_wrapper
@@ -319,38 +374,16 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
             accumulated_text = []
 
             def on_text(text_chunk):
+                """Per-request callback: accumulate text for result tracking."""
                 accumulated_text.append(text_chunk)
-                # Broadcast text chunk to WebSocket clients
-                broadcast_message({"type": "text_chunk", "request_id": request_id, "text": text_chunk})
                 logger.debug(f"[CLAUDE] Text: {text_chunk[:50]}...")
-
-            def on_tool(name, input_data):
-                logger.info(f"[CLAUDE] Tool: {name}")
-                broadcast_message({"type": "tool", "request_id": request_id, "tool": name})
 
             def on_result(result):
                 logger.info(f"[CLAUDE] Result: {result[:100]}...")
 
-            def on_usage(usage):
-                logger.info(f"[CLAUDE] Context: {usage['context_percent']}% ({usage['total_context']:,} tokens)")
-                broadcast_message(
-                    {
-                        "type": "usage",
-                        "input_tokens": usage["input_tokens"],
-                        "output_tokens": usage["output_tokens"],
-                        "cache_read_tokens": usage["cache_read_tokens"],
-                        "cache_creation_tokens": usage["cache_creation_tokens"],
-                        "total_context": usage["total_context"],
-                        "context_window": usage["context_window"],
-                        "context_percent": usage["context_percent"],
-                        "cost_usd": usage["cost_usd"],
-                    }
-                )
-
-            # Run Claude
-            result = wrapper.run(
-                text, on_text=on_text, on_tool=on_tool, on_result=on_result, on_usage=on_usage, show_terminal=True
-            )
+            # Run Claude - global callbacks handle broadcasting,
+            # per-request callbacks handle request-specific tracking
+            result = wrapper.run(text, on_text=on_text, on_result=on_result)
 
             active_claude_wrapper = None
 
@@ -763,6 +796,8 @@ class DictationHandler(BaseHTTPRequestHandler):
             chat_history.clear()
             set_claude_state("idle")
             broadcast_message({"type": "history", "messages": []})
+            # Re-initialize wrapper with background watcher
+            init_claude_wrapper()
             logger.info("[SERVER] Claude process restarted")
             self.send_json(200, {"status": "restarted"})
         except Exception as e:
@@ -1392,6 +1427,11 @@ def main():
     # Start WebSocket server in background thread
     ws_thread = threading.Thread(target=run_websocket_server, daemon=True)
     ws_thread.start()
+
+    # Initialize Claude wrapper with background watcher
+    # (needs ws_loop to be set, so we wait briefly for the WS server to start)
+    time.sleep(0.5)
+    init_claude_wrapper()
 
     server = HTTPServer(("0.0.0.0", PORT), DictationHandler)
     print(f"Dictation receiver listening on port {PORT}")
