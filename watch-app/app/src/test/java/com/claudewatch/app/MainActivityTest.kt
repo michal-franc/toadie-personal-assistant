@@ -243,6 +243,79 @@ class MainActivityTest {
         assertTrue(uiState.showSpinner)
     }
 
+    // Intent routing tests
+    @Test
+    fun `auto_record while idle with permission starts recording`() {
+        val action = MainActivity.resolveIntentAction(
+            fromPermission = false, autoRecord = true, hasPermission = true,
+            isRecording = false, isPlayingAudio = false, claudeStatus = "idle"
+        )
+        assertEquals(MainActivity.IntentAction.START_RECORDING, action)
+    }
+
+    @Test
+    fun `auto_record while recording stops and sends`() {
+        val action = MainActivity.resolveIntentAction(
+            fromPermission = false, autoRecord = true, hasPermission = true,
+            isRecording = true, isPlayingAudio = false, claudeStatus = "idle"
+        )
+        assertEquals(MainActivity.IntentAction.STOP_AND_SEND, action)
+    }
+
+    @Test
+    fun `auto_record without permission does nothing`() {
+        val action = MainActivity.resolveIntentAction(
+            fromPermission = false, autoRecord = true, hasPermission = false,
+            isRecording = false, isPlayingAudio = false, claudeStatus = "idle"
+        )
+        assertEquals(MainActivity.IntentAction.NONE, action)
+    }
+
+    @Test
+    fun `from_permission is always ignored`() {
+        val action = MainActivity.resolveIntentAction(
+            fromPermission = true, autoRecord = true, hasPermission = true,
+            isRecording = false, isPlayingAudio = false, claudeStatus = "idle"
+        )
+        assertEquals(MainActivity.IntentAction.IGNORE, action)
+    }
+
+    @Test
+    fun `normal relaunch while playing audio pauses`() {
+        val action = MainActivity.resolveIntentAction(
+            fromPermission = false, autoRecord = false, hasPermission = true,
+            isRecording = false, isPlayingAudio = true, claudeStatus = "speaking"
+        )
+        assertEquals(MainActivity.IntentAction.PAUSE_AUDIO, action)
+    }
+
+    @Test
+    fun `normal relaunch while thinking aborts`() {
+        val action = MainActivity.resolveIntentAction(
+            fromPermission = false, autoRecord = false, hasPermission = true,
+            isRecording = false, isPlayingAudio = false, claudeStatus = "thinking"
+        )
+        assertEquals(MainActivity.IntentAction.ABORT, action)
+    }
+
+    @Test
+    fun `normal relaunch while recording stops and sends`() {
+        val action = MainActivity.resolveIntentAction(
+            fromPermission = false, autoRecord = false, hasPermission = true,
+            isRecording = true, isPlayingAudio = false, claudeStatus = "idle"
+        )
+        assertEquals(MainActivity.IntentAction.STOP_AND_SEND, action)
+    }
+
+    @Test
+    fun `normal relaunch while idle does nothing`() {
+        val action = MainActivity.resolveIntentAction(
+            fromPermission = false, autoRecord = false, hasPermission = true,
+            isRecording = false, isPlayingAudio = false, claudeStatus = "idle"
+        )
+        assertEquals(MainActivity.IntentAction.NONE, action)
+    }
+
     // Helper data classes and functions
     data class WatchState(
         val hasAudioPermission: Boolean = false,

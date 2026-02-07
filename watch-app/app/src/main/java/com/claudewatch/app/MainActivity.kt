@@ -23,6 +23,8 @@ import android.app.Activity
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
 import androidx.wear.widget.WearableRecyclerView
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import org.json.JSONObject
@@ -33,11 +35,33 @@ import com.claudewatch.app.relay.RelayClient
 
 class MainActivity : Activity() {
 
+    enum class IntentAction {
+        IGNORE, START_RECORDING, STOP_AND_SEND, PAUSE_AUDIO, ABORT, NONE
+    }
+
     companion object {
         private const val TAG = "ClaudeWatch"
         private const val PERMISSION_REQUEST_CODE = 1001
         private const val FADE_MS = 200L
         private const val SCALE_MS = 250L
+
+        fun resolveIntentAction(
+            fromPermission: Boolean,
+            autoRecord: Boolean,
+            hasPermission: Boolean,
+            isRecording: Boolean,
+            isPlayingAudio: Boolean,
+            claudeStatus: String
+        ): IntentAction = when {
+            fromPermission -> IntentAction.IGNORE
+            autoRecord && isRecording -> IntentAction.STOP_AND_SEND
+            autoRecord && hasPermission -> IntentAction.START_RECORDING
+            autoRecord -> IntentAction.NONE
+            isPlayingAudio -> IntentAction.PAUSE_AUDIO
+            claudeStatus == "thinking" -> IntentAction.ABORT
+            isRecording -> IntentAction.STOP_AND_SEND
+            else -> IntentAction.NONE
+        }
     }
 
     // UI elements
@@ -100,6 +124,13 @@ class MainActivity : Activity() {
         setupClickListeners()
         setupWebSocket()
         collectFlows()
+
+        // Cold-start auto-record (from RecordActivity trampoline / hardware button)
+        if (intent?.getBooleanExtra("auto_record", false) == true) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (checkPermission() && !isRecording) startRecording()
+            }, 500)
+        }
     }
 
     private fun initViews() {
@@ -828,14 +859,21 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        if (intent?.getBooleanExtra("from_permission", false) == true) return
-        val claudeStatus = wsClient.claudeState.value.status
-        val isConnected = wsClient.connectionStatus.value == ConnectionStatus.CONNECTED
-        when {
-            isPlayingAudio -> onPauseClick()
-            claudeStatus == "thinking" -> onAbortClick()
-            isRecording -> stopRecordingAndSend()
-            isConnected && checkPermission() -> startRecording()
+        val action = resolveIntentAction(
+            fromPermission = intent?.getBooleanExtra("from_permission", false) == true,
+            autoRecord = intent?.getBooleanExtra("auto_record", false) == true,
+            hasPermission = checkPermission(),
+            isRecording = isRecording,
+            isPlayingAudio = isPlayingAudio,
+            claudeStatus = wsClient.claudeState.value.status
+        )
+        when (action) {
+            IntentAction.IGNORE -> {}
+            IntentAction.START_RECORDING -> startRecording()
+            IntentAction.STOP_AND_SEND -> stopRecordingAndSend()
+            IntentAction.PAUSE_AUDIO -> onPauseClick()
+            IntentAction.ABORT -> onAbortClick()
+            IntentAction.NONE -> {}
         }
     }
 

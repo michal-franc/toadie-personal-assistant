@@ -62,6 +62,14 @@ adb -s <watch> shell am force-stop com.claudewatch.app
 ## Git Workflow
 
 - **Never push directly to master.** Always create a feature branch and open a PR.
+- **Always use git worktrees** for feature branches. Create worktrees inside the project:
+  ```bash
+  git worktree add ./worktrees/<branch-name> -b <branch-name>
+  ```
+  Work in the worktree directory, commit there, then clean up when done:
+  ```bash
+  git worktree remove ./worktrees/<branch-name>
+  ```
 - Branch naming: `feature/<short-description>` or `fix/<short-description>`
 - Use `gh pr create` to open the PR, then let the user merge.
 
