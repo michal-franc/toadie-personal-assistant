@@ -1006,8 +1006,14 @@
 
     createApp({
       setup() {
-        // Connection
-        const wsUrl = ref(localStorage.getItem('viewer_ws_url') || 'ws://localhost:5567/ws')
+        // Connection - auto-detect WS URL when hosted (non-localhost)
+        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+        const defaultWsUrl = isLocal
+          ? 'ws://localhost:5567/ws'
+          : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`
+        const autoConnect = !isLocal
+
+        const wsUrl = ref(localStorage.getItem('viewer_ws_url') || defaultWsUrl)
         const connected = ref(false)
         const connecting = ref(false)
         const wsAlive = ref(false)
@@ -1190,9 +1196,9 @@
           connectWs()
         }
 
-        // Auto-connect if ws param provided
+        // Auto-connect if ws param provided or hosted (non-localhost)
         onMounted(() => {
-          if (wsParam) {
+          if (wsParam || autoConnect) {
             connect()
           }
         })

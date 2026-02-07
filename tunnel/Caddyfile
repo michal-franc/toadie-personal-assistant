@@ -1,0 +1,24 @@
+:8089 {
+	# Viewer page: rewrite / to /viewer and proxy to HTTP server
+	@viewer {
+		method GET
+		path /
+	}
+	handle @viewer {
+		rewrite * /viewer
+		reverse_proxy localhost:5566
+	}
+
+	# WebSocket: proxy to WS server
+	@websocket {
+		path /ws
+	}
+	handle @websocket {
+		reverse_proxy localhost:5567
+	}
+
+	# Block everything else
+	handle {
+		respond "Forbidden" 403
+	}
+}
