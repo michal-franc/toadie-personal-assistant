@@ -71,10 +71,7 @@ adb -s <watch> shell am force-stop com.claudewatch.app
   ```bash
   git worktree add ./worktrees/<branch-name> -b <branch-name>
   ```
-  Work in the worktree directory, commit there, then clean up when done:
-  ```bash
-  git worktree remove ./worktrees/<branch-name>
-  ```
+  Work in the worktree directory. **Leave the worktree alive after pushing** — don't remove it. Keep the shell cwd in the worktree so the user can continue working there. Only remove if the user explicitly asks.
 - Branch naming: `feature/<short-description>` or `fix/<short-description>`
 - Use `gh pr create` to open the PR, then let the user merge.
 
