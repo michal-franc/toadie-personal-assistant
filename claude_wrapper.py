@@ -1,108 +1,230 @@
 """
-Claude Wrapper - Persistent Claude process with stdin/stdout communication.
+Claude Tmux Session - Run Claude Code interactively inside a tmux session.
 
-Keeps a single Claude process running and sends prompts via stdin,
-avoiding the overhead of spawning a new process for each request.
+Instead of piping stdin/stdout, we launch Claude's full interactive TUI in tmux
+and read structured output from the JSONL session files that Claude Code writes
+to disk.
 
-Uses bidirectional JSON streaming:
-- Input: {"type": "user", "message": {"role": "user", "content": "prompt"}}
-- Output: stream-json format with result message indicating completion
+Prompts are sent via tmux load-buffer + paste-buffer to avoid escaping issues.
 """
 
-import json
-import os
-import select
 import subprocess
 import threading
 import time
 from typing import Callable, Optional
 
 from logger import logger
-from transcript_reader import read_context_usage
+from transcript_reader import (
+    find_latest_session,
+    get_jsonl_line_count,
+    get_projects_dir,
+    read_context_usage,
+    read_new_entries,
+)
 
-# Tmux session name for terminal output
+# Tmux session name for Claude's interactive TUI
 TMUX_SESSION = "claude-watch"
-# Log file for terminal output (tmux runs tail -f on this)
-TERMINAL_LOG = "/tmp/claude-watch-output.log"
+
+# Temp file for prompt delivery via tmux load-buffer
+PROMPT_BUFFER_FILE = "/tmp/claude-watch-prompt.txt"
+
+# How long to wait for Claude TUI to initialize before sending first prompt
+STARTUP_WAIT = 3.0
+
+# JSONL polling interval (seconds)
+POLL_INTERVAL = 0.3
+
+# Idle timeout: after this many seconds with no new JSONL activity, consider the turn done
+IDLE_TIMEOUT = 3.0
+
+# Maximum time to wait for a turn to complete (seconds)
+TURN_TIMEOUT = 300
 
 
-class ClaudeWrapper:
-    """Wrapper for running Claude with persistent stdin/stdout communication."""
+class JsonlWatcher:
+    """Watch a JSONL file for new entries and fire callbacks."""
 
-    _instance: Optional["ClaudeWrapper"] = None
+    # Entry types to skip when processing
+    SKIP_TYPES = frozenset({"file-history-snapshot", "change", "queue-operation"})
+
+    def __init__(self, workdir: str, session_id: str, from_line: int):
+        self.workdir = workdir
+        self.session_id = session_id
+        self._processed_up_to = from_line
+
+    def poll(
+        self,
+        on_text: Optional[Callable[[str], None]] = None,
+        on_tool: Optional[Callable[[str, dict], None]] = None,
+    ) -> bool:
+        """Poll for new entries and fire callbacks.
+
+        Returns True if new entries were found, False otherwise.
+        """
+        entries = read_new_entries(self.workdir, self.session_id, self._processed_up_to)
+        if not entries:
+            return False
+
+        self._processed_up_to += len(entries)
+        had_activity = False
+
+        for entry in entries:
+            entry_type = entry.get("type")
+
+            # Skip noise entries
+            if entry_type in self.SKIP_TYPES:
+                continue
+
+            # Skip sidechain (subagent) entries
+            if entry.get("isSidechain"):
+                continue
+
+            if entry_type == "assistant":
+                content = entry.get("message", {}).get("content", [])
+                for item in content:
+                    item_type = item.get("type")
+
+                    if item_type == "text":
+                        text = item.get("text", "")
+                        if text and on_text:
+                            on_text(text)
+                            had_activity = True
+
+                    elif item_type == "tool_use":
+                        tool_name = item.get("name", "unknown")
+                        tool_input = item.get("input", {})
+                        if on_tool:
+                            on_tool(tool_name, tool_input)
+                        had_activity = True
+
+            elif entry_type == "user":
+                # Tool results - just log for debugging
+                content = entry.get("message", {}).get("content", [])
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "tool_result":
+                            logger.debug("[WATCHER] Tool result received")
+
+        return had_activity
+
+    @property
+    def current_line(self) -> int:
+        return self._processed_up_to
+
+
+class ClaudeTmuxSession:
+    """Run Claude Code interactively in a tmux session, read output from JSONL files."""
+
+    _instance: Optional["ClaudeTmuxSession"] = None
     _lock = threading.Lock()
 
     def __init__(self, workdir: str, model: str = None):
-        """
-        Initialize the wrapper.
-
-        Args:
-            workdir: Working directory for Claude
-            model: Optional model name (e.g., 'sonnet', 'opus')
-        """
         self.workdir = workdir
         self.model = model
-        self.process: Optional[subprocess.Popen] = None
         self.session_id: Optional[str] = None
-        self._running = False
         self._output_lock = threading.Lock()
 
         # Context/usage tracking
         self.last_usage: Optional[dict] = None
         self.total_cost_usd: float = 0.0
-        self.context_window: int = 200000  # Default for Claude
+        self.context_window: int = 200000
 
     @classmethod
-    def get_instance(cls, workdir: str, model: str = None) -> "ClaudeWrapper":
-        """Get or create the singleton wrapper instance."""
+    def get_instance(cls, workdir: str, model: str = None) -> "ClaudeTmuxSession":
+        """Get or create the singleton instance."""
         with cls._lock:
             if cls._instance is None or not cls._instance.is_alive():
                 cls._instance = cls(workdir, model)
             return cls._instance
 
     def is_alive(self) -> bool:
-        """Check if the Claude process is still running."""
-        return self.process is not None and self.process.poll() is None
+        """Check if the tmux session is running."""
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", TMUX_SESSION],
+            capture_output=True,
+        )
+        return result.returncode == 0
 
-    def _start_process(self):
-        """Start the Claude process if not already running."""
+    def _start_session(self):
+        """Start Claude interactively in a tmux session."""
         if self.is_alive():
             return
 
-        cmd = [
-            "claude",
-            "-p",
-            "--input-format",
-            "stream-json",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            # Note: No --permission-mode flag - permissions handled by PreToolUse hook
-        ]
+        # Snapshot existing JSONL files BEFORE starting tmux
+        # so we can detect the new file Claude creates
+        projects_dir = get_projects_dir(self.workdir)
+        existing_files = set()
+        if projects_dir.is_dir():
+            existing_files = {f.name for f in projects_dir.glob("*.jsonl")}
+
+        cmd = ["tmux", "new-session", "-d", "-s", TMUX_SESSION]
+
+        # Pass environment variable so hooks know this is a server session
+        # tmux -e requires tmux 3.2+
+        cmd.extend(["-e", "CLAUDE_WATCH_SESSION=1"])
+
+        # Set working directory
+        cmd.extend(["-c", self.workdir])
+
+        # The command to run inside tmux: claude [--model X]
+        claude_cmd = ["claude"]
         if self.model:
-            cmd.extend(["--model", self.model])
+            claude_cmd.extend(["--model", self.model])
 
-        logger.info(f"[WRAPPER] Starting persistent Claude process: {' '.join(cmd)}")
+        cmd.extend(claude_cmd)
 
-        # Ensure tmux session exists for terminal output
-        self._ensure_tmux_session()
+        logger.info(f"[TMUX] Starting session: {' '.join(cmd)}")
+        subprocess.run(cmd, check=False)
 
-        # Set environment marker so hooks know this is a server session
-        env = os.environ.copy()
-        env["CLAUDE_WATCH_SESSION"] = "1"
+        # Wait for Claude TUI to initialize and create its JSONL file
+        self._discover_session_id(existing_files)
 
-        self.process = subprocess.Popen(
-            cmd,
-            cwd=self.workdir,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            env=env,
-        )
-        self._running = True
-        logger.info(f"[WRAPPER] Claude process started (PID: {self.process.pid})")
+    def _discover_session_id(self, existing_files: set[str]):
+        """Wait for Claude to create a JSONL file and extract the session ID.
+
+        Args:
+            existing_files: Set of JSONL filenames that existed before tmux started
+        """
+        projects_dir = get_projects_dir(self.workdir)
+
+        # Poll for new file
+        deadline = time.time() + STARTUP_WAIT + 10
+        while time.time() < deadline:
+            time.sleep(0.5)
+            if not projects_dir.is_dir():
+                continue
+
+            current_files = {f.name for f in projects_dir.glob("*.jsonl")}
+            new_files = current_files - existing_files
+            if new_files:
+                # Use the newest new file
+                newest = max(new_files, key=lambda f: (projects_dir / f).stat().st_mtime)
+                self.session_id = newest.replace(".jsonl", "")
+                logger.info(f"[TMUX] Discovered session: {self.session_id}")
+                return
+
+        # Fallback: use the latest session file
+        latest = find_latest_session(self.workdir)
+        if latest:
+            self.session_id = latest
+            logger.info(f"[TMUX] Using latest session (fallback): {self.session_id}")
+        else:
+            logger.warning("[TMUX] Could not discover session ID")
+
+    def _send_prompt_via_tmux(self, prompt: str):
+        """Send a prompt to the Claude TUI using tmux load-buffer + paste-buffer."""
+        # Write prompt to temp file (avoids all escaping issues with send-keys)
+        with open(PROMPT_BUFFER_FILE, "w") as f:
+            f.write(prompt)
+
+        # Load into tmux buffer and paste it
+        subprocess.run(["tmux", "load-buffer", PROMPT_BUFFER_FILE], check=False)
+        subprocess.run(["tmux", "paste-buffer", "-t", TMUX_SESSION], check=False)
+
+        # Send Enter to submit
+        subprocess.run(["tmux", "send-keys", "-t", TMUX_SESSION, "Enter"], check=False)
+
+        logger.info(f"[TMUX] Sent prompt: '{prompt[:50]}...'")
 
     def run(
         self,
@@ -111,385 +233,145 @@ class ClaudeWrapper:
         on_tool: Optional[Callable[[str, dict], None]] = None,
         on_result: Optional[Callable[[str], None]] = None,
         on_usage: Optional[Callable[[dict], None]] = None,
-        show_terminal: bool = True,
+        show_terminal: bool = True,  # kept for backward compat, no-op now
     ) -> str:
-        """
-        Send a prompt to Claude and stream the response.
+        """Send a prompt to Claude and wait for the response.
 
         Args:
             prompt: The prompt to send to Claude
             on_text: Callback for text content from assistant
             on_tool: Callback for tool invocations (name, input)
             on_result: Callback when final result is ready
-            show_terminal: Whether to show output in tmux session
+            on_usage: Callback for usage/context stats
+            show_terminal: Ignored (kept for backward compat)
 
         Returns:
-            The final result text from Claude
+            The accumulated result text from Claude
         """
         with self._output_lock:
-            self._start_process()
+            self._start_session()
 
             if not self.is_alive():
-                raise RuntimeError("Failed to start Claude process")
+                raise RuntimeError("Failed to start Claude tmux session")
 
-            logger.info(f"[WRAPPER] Sending prompt: '{prompt[:50]}...'")
+            # Always refresh session ID to the latest JSONL file.
+            # The tmux session may have been reused from a previous run,
+            # or Claude may have started a new session within the same tmux.
+            latest = find_latest_session(self.workdir)
+            if latest:
+                if latest != self.session_id:
+                    logger.info(f"[TMUX] Session ID updated: {self.session_id} -> {latest}")
+                self.session_id = latest
 
-            if show_terminal:
-                self._write_to_log(f"\n--- New Request ---\n> {prompt}\n")
+            if not self.session_id:
+                raise RuntimeError("No session ID discovered")
 
-            # Send prompt as JSON message
-            msg = json.dumps({"type": "user", "message": {"role": "user", "content": prompt}})
+            # Record current JSONL position before sending prompt
+            start_line = get_jsonl_line_count(self.workdir, self.session_id)
 
-            try:
-                self.process.stdin.write(msg + "\n")
-                self.process.stdin.flush()
-            except BrokenPipeError:
-                logger.error("[WRAPPER] Broken pipe - restarting process")
-                self._restart_process()
-                self.process.stdin.write(msg + "\n")
-                self.process.stdin.flush()
+            # Small delay to let the TUI be ready for input
+            if start_line == 0:
+                time.sleep(STARTUP_WAIT)
 
-            # Process output until we get a result
-            result = self._process_output(
-                on_text=on_text, on_tool=on_tool, on_result=on_result, on_usage=on_usage, show_terminal=show_terminal
-            )
+            # Send prompt
+            self._send_prompt_via_tmux(prompt)
 
-            return result or ""
+            # After sending, Claude may create a new JSONL file (especially
+            # for the first prompt in a new tmux session). Re-check.
+            time.sleep(1.0)
+            refreshed = find_latest_session(self.workdir)
+            if refreshed and refreshed != self.session_id:
+                logger.info(f"[TMUX] Session ID changed after prompt: {self.session_id} -> {refreshed}")
+                self.session_id = refreshed
+                start_line = 0  # New file, start from beginning
 
-    def _restart_process(self):
-        """Restart the Claude process."""
-        if self.process:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-        self.process = None
-        self._start_process()
+            # Poll JSONL for new entries
+            watcher = JsonlWatcher(self.workdir, self.session_id, start_line)
+            accumulated_text = []
 
-    def _process_output(
-        self,
-        on_text: Optional[Callable[[str], None]],
-        on_tool: Optional[Callable[[str, dict], None]],
-        on_result: Optional[Callable[[str], None]],
-        on_usage: Optional[Callable[[dict], None]],
-        show_terminal: bool,
-        timeout: float = 300,  # 5 minute timeout
-    ) -> Optional[str]:
-        """Process JSON lines from Claude's stdout until result received."""
-        result = None
-        start_time = time.time()
+            def text_handler(text):
+                accumulated_text.append(text)
+                if on_text:
+                    on_text(text)
+                logger.debug(f"[TMUX] Text: {text[:100]}...")
 
-        while time.time() - start_time < timeout:
-            # Use select to avoid blocking forever
-            ready, _, _ = select.select([self.process.stdout], [], [], 1.0)
+            last_activity = time.time()
+            deadline = time.time() + TURN_TIMEOUT
 
-            if not ready:
-                # Check if process died
-                if not self.is_alive():
-                    logger.error("[WRAPPER] Process died while waiting for output")
+            while time.time() < deadline:
+                had_activity = watcher.poll(on_text=text_handler, on_tool=on_tool)
+
+                if had_activity:
+                    last_activity = time.time()
+
+                # Check idle timeout - turn is complete when no new activity
+                idle_elapsed = time.time() - last_activity
+                if idle_elapsed >= IDLE_TIMEOUT and accumulated_text:
+                    logger.info(f"[TMUX] Turn complete (idle {idle_elapsed:.1f}s)")
                     break
-                continue
 
-            line = self.process.stdout.readline()
-            if not line:
-                continue
+                # Also break if tmux session died
+                if not self.is_alive():
+                    logger.error("[TMUX] Session died while waiting for output")
+                    break
 
-            line = line.strip()
-            if not line:
-                continue
+                time.sleep(POLL_INTERVAL)
 
-            # Write to log for tmux visibility
-            if show_terminal:
-                formatted = self._format_for_terminal(line)
-                if formatted:
-                    self._write_to_log(formatted)
+            result = "".join(accumulated_text)
 
-            try:
-                msg = json.loads(line)
-            except json.JSONDecodeError as e:
-                logger.warning(f"[WRAPPER] Invalid JSON: {e} - {line[:100]}")
-                continue
+            # Read usage from transcript
+            self._update_usage(on_usage)
 
-            msg_type = msg.get("type")
+            if on_result:
+                on_result(result)
 
-            if msg_type == "system":
-                subtype = msg.get("subtype")
-                if subtype == "init":
-                    self.session_id = msg.get("session_id")
-                    logger.info(f"[WRAPPER] Session: {self.session_id}")
+            return result
 
-            elif msg_type == "assistant":
-                content = msg.get("message", {}).get("content", [])
-                for item in content:
-                    item_type = item.get("type")
+    def _update_usage(self, on_usage: Optional[Callable[[dict], None]] = None):
+        """Read latest usage info from the transcript."""
+        if not self.session_id:
+            return
 
-                    if item_type == "text":
-                        text = item.get("text", "")
-                        if text:
-                            if on_text:
-                                on_text(text)
-                            logger.debug(f"[WRAPPER] Text: {text[:100]}...")
+        transcript_usage = read_context_usage(self.workdir, self.session_id)
+        if not transcript_usage:
+            return
 
-                    elif item_type == "tool_use":
-                        tool_name = item.get("name", "unknown")
-                        tool_input = item.get("input", {})
-                        if on_tool:
-                            on_tool(tool_name, tool_input)
-                        logger.debug(f"[WRAPPER] Tool: {tool_name}")
+        input_tokens = transcript_usage["input_tokens"]
+        cache_read = transcript_usage["cache_read_input_tokens"]
+        cache_creation = transcript_usage["cache_creation_input_tokens"]
+        output_tokens = transcript_usage["output_tokens"]
+        total_context = input_tokens + cache_read + cache_creation
 
-            elif msg_type == "user":
-                # Tool results - logged for debugging
-                content = msg.get("message", {}).get("content", [])
-                for item in content:
-                    if item.get("type") == "tool_result":
-                        logger.debug("[WRAPPER] Tool result received")
+        self.last_usage = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_tokens": cache_read,
+            "cache_creation_tokens": cache_creation,
+            "total_context": total_context,
+            "context_window": self.context_window,
+            "context_percent": (round(total_context / self.context_window * 100, 1) if self.context_window > 0 else 0),
+            "cost_usd": 0,  # Not available from transcript alone
+        }
 
-            elif msg_type == "result":
-                subtype = msg.get("subtype")
-                result = msg.get("result", "")
+        ctx_pct = self.last_usage["context_percent"]
+        logger.info(f"[TMUX] Context: {total_context:,}/{self.context_window:,} ({ctx_pct}%)")
 
-                if subtype == "success":
-                    logger.info(f"[WRAPPER] Success: {result[:100]}...")
-                elif subtype == "error":
-                    error = msg.get("error", "Unknown error")
-                    logger.error(f"[WRAPPER] Error: {error}")
-                    result = f"Error: {error}"
-
-                # Extract usage information
-                model_usage = msg.get("modelUsage", {})
-                total_cost = msg.get("total_cost_usd", 0)
-
-                # Get context window from model usage
-                for model_info in model_usage.values():
-                    if "contextWindow" in model_info:
-                        self.context_window = model_info["contextWindow"]
-                        break
-
-                # Try transcript for accurate per-turn usage (avoids cumulative over-count)
-                transcript_usage = None
-                if self.session_id:
-                    transcript_usage = read_context_usage(self.workdir, self.session_id)
-
-                if transcript_usage:
-                    input_tokens = transcript_usage["input_tokens"]
-                    cache_read = transcript_usage["cache_read_input_tokens"]
-                    cache_creation = transcript_usage["cache_creation_input_tokens"]
-                    output_tokens = transcript_usage["output_tokens"]
-                    logger.debug("[WRAPPER] Using transcript for context usage")
-                else:
-                    # Fallback to result message usage (cumulative, may over-count)
-                    usage = msg.get("usage", {})
-                    input_tokens = usage.get("input_tokens", 0)
-                    cache_read = usage.get("cache_read_input_tokens", 0)
-                    cache_creation = usage.get("cache_creation_input_tokens", 0)
-                    output_tokens = usage.get("output_tokens", 0)
-                    logger.debug("[WRAPPER] Falling back to result message for context usage")
-
-                total_context = input_tokens + cache_read + cache_creation
-
-                self.last_usage = {
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "cache_read_tokens": cache_read,
-                    "cache_creation_tokens": cache_creation,
-                    "total_context": total_context,
-                    "context_window": self.context_window,
-                    "context_percent": (
-                        round(total_context / self.context_window * 100, 1) if self.context_window > 0 else 0
-                    ),
-                    "cost_usd": total_cost,
-                }
-                self.total_cost_usd += total_cost
-
-                ctx_pct = self.last_usage["context_percent"]
-                logger.info(f"[WRAPPER] Context: {total_context:,}/{self.context_window:,} ({ctx_pct}%)")
-
-                if on_usage:
-                    on_usage(self.last_usage)
-
-                if on_result:
-                    on_result(result)
-
-                # Result received - stop processing for this request
-                return result
-
-        logger.error("[WRAPPER] Timeout waiting for result")
-        return result
-
-    def _format_for_terminal(self, json_line: str) -> str:
-        """Format JSON line for human-readable terminal output."""
-        try:
-            msg = json.loads(json_line)
-            msg_type = msg.get("type")
-
-            if msg_type == "system":
-                subtype = msg.get("subtype", "")
-                return f"\033[36m━━━ [{subtype}] Session started ━━━\033[0m"
-
-            elif msg_type == "assistant":
-                content = msg.get("message", {}).get("content", [])
-                parts = []
-                for item in content:
-                    if item.get("type") == "text":
-                        text = item.get("text", "")
-                        if text:
-                            # Wrap long text
-                            parts.append(f"\033[37m{text}\033[0m")
-                    elif item.get("type") == "tool_use":
-                        name = item.get("name", "tool")
-                        tool_input = item.get("input", {})
-
-                        # Format based on tool type
-                        if name == "Bash":
-                            cmd = tool_input.get("command", "")
-                            desc = tool_input.get("description", "")
-                            parts.append(f"\n\033[33m┌─ BASH {'─' * 50}\033[0m")
-                            if desc:
-                                parts.append(f"\033[33m│\033[0m \033[90m# {desc}\033[0m")
-                            parts.append(f"\033[33m│\033[0m \033[93m$ {cmd}\033[0m")
-                            parts.append(f"\033[33m└{'─' * 56}\033[0m")
-                        elif name == "Write":
-                            path = tool_input.get("file_path", "")
-                            content_preview = tool_input.get("content", "")[:100]
-                            parts.append(f"\n\033[35m┌─ WRITE {'─' * 49}\033[0m")
-                            parts.append(f"\033[35m│\033[0m {path}")
-                            ellipsis = "..." if len(tool_input.get("content", "")) > 100 else ""
-                            parts.append(f"\033[35m│\033[0m \033[90m{content_preview}{ellipsis}\033[0m")
-                            parts.append(f"\033[35m└{'─' * 56}\033[0m")
-                        elif name == "Edit":
-                            path = tool_input.get("file_path", "")
-                            old = tool_input.get("old_string", "")[:50]
-                            new = tool_input.get("new_string", "")[:50]
-                            parts.append(f"\n\033[35m┌─ EDIT {'─' * 50}\033[0m")
-                            parts.append(f"\033[35m│\033[0m {path}")
-                            old_ellipsis = "..." if len(tool_input.get("old_string", "")) > 50 else ""
-                            new_ellipsis = "..." if len(tool_input.get("new_string", "")) > 50 else ""
-                            parts.append(f"\033[35m│\033[0m \033[91m- {old}{old_ellipsis}\033[0m")
-                            parts.append(f"\033[35m│\033[0m \033[92m+ {new}{new_ellipsis}\033[0m")
-                            parts.append(f"\033[35m└{'─' * 56}\033[0m")
-                        elif name == "Read":
-                            path = tool_input.get("file_path", "")
-                            parts.append(f"\033[36m[READ]\033[0m {path}")
-                        elif name == "Glob":
-                            pattern = tool_input.get("pattern", "")
-                            parts.append(f"\033[36m[GLOB]\033[0m {pattern}")
-                        elif name == "Grep":
-                            pattern = tool_input.get("pattern", "")
-                            parts.append(f"\033[36m[GREP]\033[0m {pattern}")
-                        else:
-                            parts.append(f"\033[33m[{name}]\033[0m")
-
-                return "\n".join(parts) if parts else ""
-
-            elif msg_type == "user":
-                content = msg.get("message", {}).get("content", [])
-                parts = []
-                for item in content:
-                    if item.get("type") == "tool_result":
-                        result_content = item.get("content", "")
-                        is_error = item.get("is_error", False)
-
-                        if is_error:
-                            parts.append(f"\033[91m┌─ ERROR {'─' * 49}\033[0m")
-                            # Show first few lines of error
-                            lines = str(result_content).split("\n")[:5]
-                            for line in lines:
-                                parts.append(f"\033[91m│\033[0m {line[:80]}")
-                            if len(str(result_content).split("\n")) > 5:
-                                parts.append("\033[91m│\033[0m ...")
-                            parts.append(f"\033[91m└{'─' * 56}\033[0m")
-                        else:
-                            # Show brief result
-                            result_str = str(result_content)
-                            if len(result_str) > 200:
-                                parts.append(f"\033[32m[✓ result]\033[0m {result_str[:200]}...")
-                            elif result_str:
-                                lines = result_str.split("\n")[:3]
-                                if len(lines) == 1:
-                                    parts.append(f"\033[32m[✓]\033[0m {lines[0][:100]}")
-                                else:
-                                    parts.append("\033[32m[✓ result]\033[0m")
-                                    for line in lines:
-                                        parts.append(f"    {line[:80]}")
-                                    if len(result_str.split("\n")) > 3:
-                                        parts.append("    ...")
-                            else:
-                                parts.append("\033[32m[✓]\033[0m")
-
-                return "\n".join(parts) if parts else ""
-
-            elif msg_type == "result":
-                result = msg.get("result", "")
-                usage = msg.get("usage", {})
-                cost = msg.get("total_cost_usd", 0)
-
-                # Calculate context
-                total_ctx = (
-                    usage.get("input_tokens", 0)
-                    + usage.get("cache_read_input_tokens", 0)
-                    + usage.get("cache_creation_input_tokens", 0)
-                )
-
-                output = ["\n\033[32m━━━ DONE ━━━\033[0m"]
-                if result:
-                    # Show first 300 chars of result
-                    preview = result[:300].replace("\n", " ")
-                    output.append(f"\033[37m{preview}{'...' if len(result) > 300 else ''}\033[0m")
-                output.append(f"\033[90mContext: {total_ctx:,} tokens | Cost: ${cost:.4f}\033[0m")
-                return "\n".join(output)
-
-            return ""
-
-        except json.JSONDecodeError:
-            return json_line
-
-    def _ensure_tmux_session(self):
-        """Ensure tmux session exists for output display."""
-        # Check if session exists
-        result = subprocess.run(["tmux", "has-session", "-t", TMUX_SESSION], capture_output=True)
-
-        if result.returncode != 0:
-            # Initialize log file with header
-            with open(TERMINAL_LOG, "w") as f:
-                f.write("=== Claude Watch Output ===\n")
-                f.write(f"Working dir: {self.workdir}\n")
-                f.write("=" * 30 + "\n\n")
-
-            # Create new session running tail -f on the log
-            subprocess.run(
-                [
-                    "tmux",
-                    "new-session",
-                    "-d",  # detached
-                    "-s",
-                    TMUX_SESSION,
-                    "-c",
-                    self.workdir,
-                    "tail",
-                    "-f",
-                    TERMINAL_LOG,
-                ],
-                check=False,
-            )
-            logger.info(f"[WRAPPER] Created tmux session '{TMUX_SESSION}' (attach with: tmux attach -t {TMUX_SESSION})")
-
-    def _write_to_log(self, text: str):
-        """Write text to the terminal log file."""
-        try:
-            with open(TERMINAL_LOG, "a") as f:
-                f.write(text + "\n")
-        except Exception as e:
-            logger.debug(f"[WRAPPER] log write error: {e}")
+        if on_usage:
+            on_usage(self.last_usage)
 
     def cancel(self):
-        """Cancel the running Claude process."""
-        if self.process:
-            self.process.terminate()
-            logger.info("[WRAPPER] Process terminated")
-            self.process = None
+        """Cancel the running Claude operation by sending Ctrl+C."""
+        if self.is_alive():
+            subprocess.run(["tmux", "send-keys", "-t", TMUX_SESSION, "C-c"], check=False)
+            logger.info("[TMUX] Sent Ctrl+C to cancel")
 
     def shutdown(self):
-        """Shutdown the persistent process."""
-        self.cancel()
-        ClaudeWrapper._instance = None
+        """Kill the tmux session entirely."""
+        if self.is_alive():
+            subprocess.run(["tmux", "kill-session", "-t", TMUX_SESSION], check=False)
+            logger.info("[TMUX] Session killed")
+        ClaudeTmuxSession._instance = None
+
+
+# Backward compatibility alias for server.py
+ClaudeWrapper = ClaudeTmuxSession

@@ -14,6 +14,19 @@ from pathlib import Path
 from logger import logger
 
 
+def _encode_workdir(workdir: str) -> str:
+    """Encode a working directory path for Claude Code's projects directory."""
+    encoded = workdir.replace("/", "-")
+    if not encoded.startswith("-"):
+        encoded = "-" + encoded
+    return encoded
+
+
+def get_projects_dir(workdir: str) -> Path:
+    """Get the Claude Code projects directory for a given working directory."""
+    return Path.home() / ".claude" / "projects" / _encode_workdir(workdir)
+
+
 def get_transcript_path(workdir: str, session_id: str) -> Path:
     """Construct the path to a Claude Code transcript file.
 
@@ -24,13 +37,75 @@ def get_transcript_path(workdir: str, session_id: str) -> Path:
     Returns:
         Path to the transcript JSONL file
     """
-    # Claude Code encodes paths by replacing / with -
-    # /home/user/project -> -home-user-project
-    encoded_path = workdir.replace("/", "-")
-    if not encoded_path.startswith("-"):
-        encoded_path = "-" + encoded_path
+    return get_projects_dir(workdir) / f"{session_id}.jsonl"
 
-    return Path.home() / ".claude" / "projects" / encoded_path / f"{session_id}.jsonl"
+
+def find_latest_session(workdir: str) -> str | None:
+    """Find the most recently modified JSONL session file.
+
+    Args:
+        workdir: The working directory Claude was started in
+
+    Returns:
+        Session ID (filename without .jsonl) or None if no sessions exist
+    """
+    projects_dir = get_projects_dir(workdir)
+    if not projects_dir.is_dir():
+        return None
+
+    jsonl_files = sorted(projects_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not jsonl_files:
+        return None
+
+    return jsonl_files[0].stem
+
+
+def get_jsonl_line_count(workdir: str, session_id: str) -> int:
+    """Get the current number of lines in a JSONL transcript file.
+
+    Args:
+        workdir: The working directory Claude was started in
+        session_id: The session ID
+
+    Returns:
+        Number of lines, or 0 if the file doesn't exist
+    """
+    path = get_transcript_path(workdir, session_id)
+    try:
+        with open(path, "r") as f:
+            return sum(1 for _ in f)
+    except (FileNotFoundError, PermissionError, OSError):
+        return 0
+
+
+def read_new_entries(workdir: str, session_id: str, from_line: int) -> list[dict]:
+    """Read JSONL entries starting from a given line offset.
+
+    Args:
+        workdir: The working directory Claude was started in
+        session_id: The session ID
+        from_line: 0-based line index to start reading from
+
+    Returns:
+        List of parsed JSON entries (skips blank lines and invalid JSON)
+    """
+    path = get_transcript_path(workdir, session_id)
+    entries = []
+    try:
+        with open(path, "r") as f:
+            for i, line in enumerate(f):
+                if i < from_line:
+                    continue
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logger.debug(f"[TRANSCRIPT] Cannot read {path}: {e}")
+    return entries
 
 
 def read_context_usage(workdir: str, session_id: str) -> dict | None:
