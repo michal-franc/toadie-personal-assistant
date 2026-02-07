@@ -9,7 +9,6 @@ context window fill level, unlike the cumulative counts in the result message.
 """
 
 import json
-import os
 from pathlib import Path
 
 from logger import logger

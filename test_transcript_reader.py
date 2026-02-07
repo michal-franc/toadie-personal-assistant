@@ -4,8 +4,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from transcript_reader import get_transcript_path, read_context_usage
 
 
@@ -53,10 +51,12 @@ class TestReadContextUsage:
 
     def _make_user_entry(self):
         """Helper to create a user transcript entry."""
-        return json.dumps({
-            "type": "user",
-            "message": {"role": "user", "content": "test prompt"},
-        })
+        return json.dumps(
+            {
+                "type": "user",
+                "message": {"role": "user", "content": "test prompt"},
+            }
+        )
 
     def test_returns_usage_from_last_assistant(self, tmp_path):
         """Should return usage from the last assistant entry"""
@@ -67,10 +67,7 @@ class TestReadContextUsage:
             "output_tokens": 50,
         }
         transcript = tmp_path / "sess.jsonl"
-        transcript.write_text(
-            self._make_user_entry() + "\n"
-            + self._make_assistant_entry(usage) + "\n"
-        )
+        transcript.write_text(self._make_user_entry() + "\n" + self._make_assistant_entry(usage) + "\n")
 
         with patch("transcript_reader.get_transcript_path", return_value=transcript):
             result = read_context_usage("/fake/dir", "sess")
@@ -98,9 +95,12 @@ class TestReadContextUsage:
         }
         transcript = tmp_path / "sess.jsonl"
         transcript.write_text(
-            self._make_assistant_entry(old_usage) + "\n"
-            + self._make_user_entry() + "\n"
-            + self._make_assistant_entry(new_usage) + "\n"
+            self._make_assistant_entry(old_usage)
+            + "\n"
+            + self._make_user_entry()
+            + "\n"
+            + self._make_assistant_entry(new_usage)
+            + "\n"
         )
 
         with patch("transcript_reader.get_transcript_path", return_value=transcript):
@@ -125,8 +125,10 @@ class TestReadContextUsage:
         }
         transcript = tmp_path / "sess.jsonl"
         transcript.write_text(
-            self._make_assistant_entry(main_usage) + "\n"
-            + self._make_assistant_entry(sidechain_usage, is_sidechain=True) + "\n"
+            self._make_assistant_entry(main_usage)
+            + "\n"
+            + self._make_assistant_entry(sidechain_usage, is_sidechain=True)
+            + "\n"
         )
 
         with patch("transcript_reader.get_transcript_path", return_value=transcript):
@@ -144,10 +146,7 @@ class TestReadContextUsage:
             "output_tokens": 50,
         }
         transcript = tmp_path / "sess.jsonl"
-        transcript.write_text(
-            self._make_assistant_entry(usage) + "\n"
-            + self._make_user_entry() + "\n"
-        )
+        transcript.write_text(self._make_assistant_entry(usage) + "\n" + self._make_user_entry() + "\n")
 
         with patch("transcript_reader.get_transcript_path", return_value=transcript):
             result = read_context_usage("/fake/dir", "sess")
@@ -163,19 +162,18 @@ class TestReadContextUsage:
             "cache_creation_input_tokens": 200,
             "output_tokens": 50,
         }
-        no_usage_entry = json.dumps({
-            "type": "assistant",
-            "isSidechain": False,
-            "message": {
-                "role": "assistant",
-                "content": [{"type": "text", "text": "thinking..."}],
-            },
-        })
-        transcript = tmp_path / "sess.jsonl"
-        transcript.write_text(
-            self._make_assistant_entry(good_usage) + "\n"
-            + no_usage_entry + "\n"
+        no_usage_entry = json.dumps(
+            {
+                "type": "assistant",
+                "isSidechain": False,
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "thinking..."}],
+                },
+            }
         )
+        transcript = tmp_path / "sess.jsonl"
+        transcript.write_text(self._make_assistant_entry(good_usage) + "\n" + no_usage_entry + "\n")
 
         with patch("transcript_reader.get_transcript_path", return_value=transcript):
             result = read_context_usage("/fake/dir", "sess")
@@ -204,10 +202,7 @@ class TestReadContextUsage:
     def test_returns_none_for_no_assistant_entries(self, tmp_path):
         """Should return None when transcript has no assistant entries"""
         transcript = tmp_path / "sess.jsonl"
-        transcript.write_text(
-            self._make_user_entry() + "\n"
-            + self._make_user_entry() + "\n"
-        )
+        transcript.write_text(self._make_user_entry() + "\n" + self._make_user_entry() + "\n")
 
         with patch("transcript_reader.get_transcript_path", return_value=transcript):
             result = read_context_usage("/fake/dir", "sess")
@@ -223,11 +218,7 @@ class TestReadContextUsage:
             "output_tokens": 50,
         }
         transcript = tmp_path / "sess.jsonl"
-        transcript.write_text(
-            self._make_assistant_entry(usage) + "\n"
-            + "not valid json\n"
-            + "{broken json\n"
-        )
+        transcript.write_text(self._make_assistant_entry(usage) + "\n" + "not valid json\n" + "{broken json\n")
 
         with patch("transcript_reader.get_transcript_path", return_value=transcript):
             result = read_context_usage("/fake/dir", "sess")
@@ -244,11 +235,7 @@ class TestReadContextUsage:
             "output_tokens": 50,
         }
         transcript = tmp_path / "sess.jsonl"
-        transcript.write_text(
-            self._make_assistant_entry(usage) + "\n"
-            + "\n"
-            + "  \n"
-        )
+        transcript.write_text(self._make_assistant_entry(usage) + "\n" + "\n" + "  \n")
 
         with patch("transcript_reader.get_transcript_path", return_value=transcript):
             result = read_context_usage("/fake/dir", "sess")
@@ -280,8 +267,10 @@ class TestReadContextUsage:
         }
         transcript = tmp_path / "sess.jsonl"
         transcript.write_text(
-            self._make_assistant_entry(usage, is_sidechain=True) + "\n"
-            + self._make_assistant_entry(usage, is_sidechain=True) + "\n"
+            self._make_assistant_entry(usage, is_sidechain=True)
+            + "\n"
+            + self._make_assistant_entry(usage, is_sidechain=True)
+            + "\n"
         )
 
         with patch("transcript_reader.get_transcript_path", return_value=transcript):
