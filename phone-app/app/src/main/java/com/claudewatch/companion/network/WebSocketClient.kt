@@ -1,6 +1,8 @@
 package com.claudewatch.companion.network
 
 import android.util.Log
+import com.claudewatch.companion.creature.BackgroundTheme
+import com.claudewatch.companion.creature.CreatureMood
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +35,11 @@ data class ContextUsage(
     val contextWindow: Int = 200000,
     val contextPercent: Float = 0f,
     val costUsd: Float = 0f
+)
+
+data class MoodUpdate(
+    val mood: CreatureMood = CreatureMood.NEUTRAL,
+    val background: BackgroundTheme = BackgroundTheme.DEFAULT
 )
 
 data class PromptOption(
@@ -91,6 +98,9 @@ class WebSocketClient(
 
     private val _contextUsage = MutableStateFlow(ContextUsage())
     val contextUsage: StateFlow<ContextUsage> = _contextUsage
+
+    private val _moodUpdate = MutableStateFlow(MoodUpdate())
+    val moodUpdate: StateFlow<MoodUpdate> = _moodUpdate
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -256,6 +266,12 @@ class WebSocketClient(
                         contextWindow = json.optInt("context_window", 200000),
                         contextPercent = json.optDouble("context_percent", 0.0).toFloat(),
                         costUsd = json.optDouble("cost_usd", 0.0).toFloat()
+                    )
+                }
+                "mood" -> {
+                    _moodUpdate.value = MoodUpdate(
+                        mood = CreatureMood.fromString(json.optString("mood", "neutral")),
+                        background = BackgroundTheme.fromString(json.optString("background", "default"))
                     )
                 }
             }

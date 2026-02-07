@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_wrapper import ClaudeWrapper
+from claude_wrapper import ClaudeWrapper, extract_mood
 
 
 class TestClaudeWrapperInit:
@@ -341,3 +341,76 @@ class TestClaudeWrapperShutdown:
         wrapper.shutdown()
 
         assert ClaudeWrapper._instance is None
+
+
+class TestExtractMood:
+    """Tests for extract_mood function"""
+
+    def test_extract_valid_mood(self):
+        """Should extract mood and clean text"""
+        text = "Here is the result.\n[[mood:happy,bg:warm]]"
+        mood, cleaned = extract_mood(text)
+        assert mood == {"mood": "happy", "background": "warm"}
+        assert cleaned == "Here is the result."
+
+    def test_extract_mood_with_trailing_whitespace(self):
+        """Should handle trailing whitespace after tag"""
+        text = "Done!\n[[mood:focused,bg:cool]]  \n"
+        mood, cleaned = extract_mood(text)
+        assert mood == {"mood": "focused", "background": "cool"}
+        assert cleaned == "Done!"
+
+    def test_no_mood_tag(self):
+        """Should return None and original text when no tag"""
+        text = "Just a normal response."
+        mood, cleaned = extract_mood(text)
+        assert mood is None
+        assert cleaned == text
+
+    def test_invalid_mood_value(self):
+        """Should reject invalid mood values"""
+        text = "Response\n[[mood:ecstatic,bg:warm]]"
+        mood, cleaned = extract_mood(text)
+        assert mood is None
+        assert cleaned == text
+
+    def test_invalid_background_value(self):
+        """Should reject invalid background values"""
+        text = "Response\n[[mood:happy,bg:rainbow]]"
+        mood, cleaned = extract_mood(text)
+        assert mood is None
+        assert cleaned == text
+
+    def test_case_insensitive(self):
+        """Should handle mixed case"""
+        text = "Result\n[[mood:HAPPY,bg:Cool]]"
+        mood, cleaned = extract_mood(text)
+        assert mood == {"mood": "happy", "background": "cool"}
+        assert cleaned == "Result"
+
+    def test_all_valid_moods(self):
+        """Should accept all valid moods"""
+        for m in ["neutral", "happy", "curious", "focused", "proud", "confused", "playful"]:
+            mood, _ = extract_mood(f"text\n[[mood:{m},bg:default]]")
+            assert mood is not None, f"Failed for mood: {m}"
+            assert mood["mood"] == m
+
+    def test_all_valid_backgrounds(self):
+        """Should accept all valid backgrounds"""
+        for bg in ["default", "warm", "cool", "nature", "electric"]:
+            mood, _ = extract_mood(f"text\n[[mood:neutral,bg:{bg}]]")
+            assert mood is not None, f"Failed for background: {bg}"
+            assert mood["background"] == bg
+
+    def test_mood_in_middle_of_text(self):
+        """Should only match tag at end of text"""
+        text = "I said [[mood:happy,bg:warm]] earlier. Now done."
+        mood, cleaned = extract_mood(text)
+        assert mood is None
+        assert cleaned == text
+
+    def test_empty_text(self):
+        """Should handle empty string"""
+        mood, cleaned = extract_mood("")
+        assert mood is None
+        assert cleaned == ""

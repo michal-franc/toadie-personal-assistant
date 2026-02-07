@@ -11,6 +11,7 @@ Uses bidirectional JSON streaming:
 
 import json
 import os
+import re
 import select
 import subprocess
 import threading
@@ -19,6 +20,35 @@ from typing import Callable, Optional
 
 from logger import logger
 from transcript_reader import read_context_usage
+
+# Mood system prompt — tells Claude to occasionally append a mood tag
+MOOD_SYSTEM_PROMPT = (
+    "About 30% of the time — especially when your mood shifts (e.g. after completing a task, "
+    "hitting an error, starting something new, or feeling curious) — append a mood tag on its own "
+    "line at the very end of your response in this exact format: "
+    "[[mood:MOOD,bg:BACKGROUND]] where MOOD is one of: neutral, happy, curious, focused, proud, confused, playful "
+    "and BACKGROUND is one of: default, warm, cool, nature, electric. "
+    "Pick mood and background to reflect the conversation vibe — happy/warm after success, "
+    "focused/cool while deep in code, confused/electric on errors, curious/nature when exploring. "
+    "Most responses should NOT include this tag. Only include it when the mood has meaningfully changed."
+)
+
+VALID_MOODS = {"neutral", "happy", "curious", "focused", "proud", "confused", "playful"}
+VALID_BACKGROUNDS = {"default", "warm", "cool", "nature", "electric"}
+
+_MOOD_RE = re.compile(r"\[\[mood:(\w+),bg:(\w+)\]\]\s*$")
+
+
+def extract_mood(text: str):
+    """Extract mood tag from text. Returns (mood_dict_or_None, cleaned_text)."""
+    m = _MOOD_RE.search(text)
+    if not m:
+        return None, text
+    mood_str, bg_str = m.group(1).lower(), m.group(2).lower()
+    if mood_str not in VALID_MOODS or bg_str not in VALID_BACKGROUNDS:
+        return None, text
+    cleaned = text[:m.start()].rstrip()
+    return {"mood": mood_str, "background": bg_str}, cleaned
 
 # Tmux session name for terminal output
 TMUX_SESSION = "claude-watch"
@@ -77,6 +107,8 @@ class ClaudeWrapper:
             "--output-format",
             "stream-json",
             "--verbose",
+            "--append-system-prompt",
+            MOOD_SYSTEM_PROMPT,
             # Note: No --permission-mode flag - permissions handled by PreToolUse hook
         ]
         if self.model:
@@ -111,6 +143,7 @@ class ClaudeWrapper:
         on_tool: Optional[Callable[[str, dict], None]] = None,
         on_result: Optional[Callable[[str], None]] = None,
         on_usage: Optional[Callable[[dict], None]] = None,
+        on_mood: Optional[Callable[[dict], None]] = None,
         show_terminal: bool = True,
     ) -> str:
         """
@@ -121,10 +154,11 @@ class ClaudeWrapper:
             on_text: Callback for text content from assistant
             on_tool: Callback for tool invocations (name, input)
             on_result: Callback when final result is ready
+            on_mood: Callback when mood tag extracted from result
             show_terminal: Whether to show output in tmux session
 
         Returns:
-            The final result text from Claude
+            The final result text from Claude (with mood tag stripped)
         """
         with self._output_lock:
             self._start_process()
@@ -151,7 +185,8 @@ class ClaudeWrapper:
 
             # Process output until we get a result
             result = self._process_output(
-                on_text=on_text, on_tool=on_tool, on_result=on_result, on_usage=on_usage, show_terminal=show_terminal
+                on_text=on_text, on_tool=on_tool, on_result=on_result, on_usage=on_usage,
+                on_mood=on_mood, show_terminal=show_terminal
             )
 
             return result or ""
@@ -173,7 +208,8 @@ class ClaudeWrapper:
         on_tool: Optional[Callable[[str, dict], None]],
         on_result: Optional[Callable[[str], None]],
         on_usage: Optional[Callable[[dict], None]],
-        show_terminal: bool,
+        on_mood: Optional[Callable[[dict], None]] = None,
+        show_terminal: bool = True,
         timeout: float = 300,  # 5 minute timeout
     ) -> Optional[str]:
         """Process JSON lines from Claude's stdout until result received."""
@@ -250,6 +286,11 @@ class ClaudeWrapper:
                 result = msg.get("result", "")
 
                 if subtype == "success":
+                    # Extract mood tag from result before logging/callbacks
+                    mood_data, result = extract_mood(result)
+                    if mood_data and on_mood:
+                        logger.info(f"[WRAPPER] Mood: {mood_data['mood']}, bg: {mood_data['background']}")
+                        on_mood(mood_data)
                     logger.info(f"[WRAPPER] Success: {result[:100]}...")
                 elif subtype == "error":
                     error = msg.get("error", "Unknown error")

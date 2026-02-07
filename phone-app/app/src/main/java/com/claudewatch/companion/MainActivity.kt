@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.claudewatch.companion.chat.ChatAdapter
+import com.claudewatch.companion.creature.CreatureMood
 import com.claudewatch.companion.creature.CreatureState
 import com.claudewatch.companion.databinding.ActivityMainBinding
 import com.claudewatch.companion.kiosk.KioskManager
@@ -449,6 +450,14 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             webSocketClient?.contextUsage?.collectLatest { usage ->
                 updateContextUI(usage)
+            }
+        }
+
+        // Collect mood updates
+        lifecycleScope.launch {
+            webSocketClient?.moodUpdate?.collectLatest { mood ->
+                binding.creatureView.setMood(mood.mood)
+                binding.backgroundView.setTheme(mood.background)
             }
         }
 

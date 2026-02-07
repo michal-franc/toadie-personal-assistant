@@ -100,6 +100,9 @@ active_claude_wrapper: ClaudeWrapper = None
 # Current pending prompt (permission request from Claude)
 current_prompt = None  # {question, options: [{num, label, description, selected}], timestamp}
 
+# Current creature mood (persists until Claude sends a new one)
+current_mood = {"mood": "neutral", "background": "default"}
+
 # Pending permission requests from hooks (keyed by request_id)
 pending_permissions = {}  # {request_id: {tool_name, tool_input, tool_use_id, status, decision, reason, timestamp}}
 PERMISSION_TIMEOUT = 120  # seconds
@@ -347,9 +350,20 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                     }
                 )
 
+            def on_mood(mood_data):
+                global current_mood
+                current_mood = mood_data
+                broadcast_message({
+                    "type": "mood",
+                    "mood": mood_data["mood"],
+                    "background": mood_data["background"],
+                })
+                logger.info(f"[MOOD] {mood_data['mood']}, bg: {mood_data['background']}")
+
             # Run Claude
             result = wrapper.run(
-                text, on_text=on_text, on_tool=on_tool, on_result=on_result, on_usage=on_usage, show_terminal=True
+                text, on_text=on_text, on_tool=on_tool, on_result=on_result, on_usage=on_usage,
+                on_mood=on_mood, show_terminal=True
             )
 
             active_claude_wrapper = None
@@ -751,16 +765,18 @@ class DictationHandler(BaseHTTPRequestHandler):
 
     def handle_claude_restart(self):
         """Handle POST /api/claude/restart to restart the Claude process"""
-        global active_claude_wrapper
+        global active_claude_wrapper, current_mood
         try:
             wrapper = ClaudeWrapper._instance
             if wrapper:
                 wrapper.shutdown()
                 active_claude_wrapper = None
-            # Clear chat history
+            # Clear chat history and reset mood
             chat_history.clear()
+            current_mood = {"mood": "neutral", "background": "default"}
             set_claude_state("idle")
             broadcast_message({"type": "history", "messages": []})
+            broadcast_message({"type": "mood", "mood": "neutral", "background": "default"})
             logger.info("[SERVER] Claude process restarted")
             self.send_json(200, {"status": "restarted"})
         except Exception as e:
@@ -1224,12 +1240,13 @@ async def websocket_handler(request):
     }
     logger.info(f"[WS] Client connected: {device_type} ({device_id or client_ip}). Total: {len(websocket_clients)}")
 
-    # Send current state and chat history on connect
+    # Send current state, chat history, and mood on connect
     try:
         await ws.send_json(
             {"type": "state", "status": claude_state["status"], "request_id": claude_state.get("current_request_id")}
         )
         await ws.send_json({"type": "history", "messages": chat_history})
+        await ws.send_json({"type": "mood", "mood": current_mood["mood"], "background": current_mood["background"]})
     except Exception as e:
         logger.error(f"[WS] Error sending initial state: {e}")
 

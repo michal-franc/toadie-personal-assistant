@@ -37,6 +37,12 @@ class CreatureView @JvmOverloads constructor(
 
     private var stateTransitionAnimator: ValueAnimator? = null
 
+    // Mood system — orthogonal to state, affects glow/particles/horns
+    private var currentMood = CreatureMood.NEUTRAL
+    private var moodGlowColor = Color.TRANSPARENT
+    private var moodHornBias = 0f  // positive = perked, negative = droopy
+    private var moodTransitionAnimator: ValueAnimator? = null
+
     // Particle system
     private val particles = mutableListOf<Particle>()
     private var lastFrameTime = System.nanoTime()
@@ -275,6 +281,44 @@ class CreatureView @JvmOverloads constructor(
         particles.clear()
     }
 
+    fun setMood(mood: CreatureMood) {
+        if (currentMood == mood) return
+        currentMood = mood
+
+        val targetGlow = when (mood) {
+            CreatureMood.NEUTRAL -> Color.TRANSPARENT
+            CreatureMood.HAPPY -> Color.argb(60, 0xFF, 0xD7, 0x00)     // gold
+            CreatureMood.CURIOUS -> Color.argb(50, 0x00, 0x99, 0xFF)   // blue
+            CreatureMood.FOCUSED -> Color.argb(40, 0xFF, 0xFF, 0xFF)   // white
+            CreatureMood.PROUD -> Color.argb(55, 0xFF, 0x8C, 0x00)     // orange
+            CreatureMood.CONFUSED -> Color.argb(50, 0x9C, 0x27, 0xB0)  // purple
+            CreatureMood.PLAYFUL -> Color.argb(50, 0xFF, 0x69, 0xB4)   // pink
+        }
+        val targetHornBias = when (mood) {
+            CreatureMood.HAPPY, CreatureMood.CURIOUS, CreatureMood.PLAYFUL -> -8f  // perked up
+            CreatureMood.CONFUSED -> 10f  // droopy
+            CreatureMood.PROUD -> -5f
+            else -> 0f
+        }
+
+        val startGlow = moodGlowColor
+        val startHornBias = moodHornBias
+        val evaluator = android.animation.ArgbEvaluator()
+
+        moodTransitionAnimator?.cancel()
+        moodTransitionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 500
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { animator ->
+                val t = animator.animatedValue as Float
+                moodGlowColor = evaluator.evaluate(t, startGlow, targetGlow) as Int
+                moodHornBias = startHornBias + (targetHornBias - startHornBias) * t
+                invalidate()
+            }
+            start()
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
@@ -379,6 +423,22 @@ class CreatureView @JvmOverloads constructor(
             canvas.drawCircle(shadowCx, shadowCy, glowRadius, glowPaint)
             canvas.restore()
         }
+
+        // Mood glow overlay (additive, layered on top of state glow)
+        if (moodGlowColor != Color.TRANSPARENT) {
+            val moodGlowRadius = radius * 1.1f * breathScale
+            glowPaint.shader = RadialGradient(
+                shadowCx, shadowCy,
+                maxOf(moodGlowRadius, 1f),
+                intArrayOf(moodGlowColor, Color.TRANSPARENT),
+                floatArrayOf(0f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            canvas.save()
+            canvas.scale(1f, 0.4f, shadowCx, shadowCy)
+            canvas.drawCircle(shadowCx, shadowCy, moodGlowRadius, glowPaint)
+            canvas.restore()
+        }
     }
 
     private fun drawBody(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
@@ -430,7 +490,7 @@ class CreatureView @JvmOverloads constructor(
             val hornBaseY = cy - radius * 0.75f
 
             canvas.save()
-            canvas.rotate(side * hornAngle, hornBaseX, hornBaseY)
+            canvas.rotate(side * (hornAngle + moodHornBias), hornBaseX, hornBaseY)
 
             val hornPath = Path()
             // Triangular/conical horn
@@ -890,5 +950,6 @@ class CreatureView @JvmOverloads constructor(
         thinkingAnimator.cancel()
         mainAnimator.cancel()
         stateTransitionAnimator?.cancel()
+        moodTransitionAnimator?.cancel()
     }
 }
