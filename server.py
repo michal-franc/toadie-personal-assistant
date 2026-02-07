@@ -32,6 +32,7 @@ from aiohttp import web
 
 from logger import logger
 from claude_wrapper import ClaudeWrapper
+from tailscale_auth import verify_peer
 
 # Load Deepgram API key from environment (set via EnvironmentFile in systemd)
 if not os.environ.get("DEEPGRAM_API_KEY"):
@@ -543,6 +544,11 @@ class DictationHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode())
 
     def do_POST(self):
+        peer_ip = getattr(self, 'client_address', ('127.0.0.1',))[0]
+        if not verify_peer(peer_ip):
+            self.send_error(403, "Unauthorized Tailscale node")
+            return
+
         content_length = int(self.headers.get('Content-Length', 0))
         content_type = self.headers.get('Content-Type', 'unknown')
 
@@ -722,6 +728,11 @@ class DictationHandler(BaseHTTPRequestHandler):
             }, cors=False)
 
     def do_GET(self):
+        peer_ip = getattr(self, 'client_address', ('127.0.0.1',))[0]
+        if not verify_peer(peer_ip):
+            self.send_error(403, "Unauthorized Tailscale node")
+            return
+
         if self.path == '/health':
             self.send_json(200, {'status': 'ok'}, cors=False)
         elif self.path.startswith('/api/response/'):
@@ -1220,6 +1231,9 @@ async def broadcast_clients():
 
 async def websocket_handler(request):
     """Handle WebSocket connections"""
+    if not verify_peer(request.remote):
+        return web.Response(status=403, text="Unauthorized Tailscale node")
+
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
