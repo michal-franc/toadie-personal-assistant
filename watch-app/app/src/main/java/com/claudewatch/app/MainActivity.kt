@@ -23,6 +23,8 @@ import android.app.Activity
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
 import androidx.wear.widget.WearableRecyclerView
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import org.json.JSONObject
@@ -100,6 +102,13 @@ class MainActivity : Activity() {
         setupClickListeners()
         setupWebSocket()
         collectFlows()
+
+        // Cold-start auto-record (from RecordActivity trampoline / hardware button)
+        if (intent?.getBooleanExtra("auto_record", false) == true) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (checkPermission() && !isRecording) startRecording()
+            }, 500)
+        }
     }
 
     private fun initViews() {
@@ -829,13 +838,15 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         if (intent?.getBooleanExtra("from_permission", false) == true) return
+        if (intent?.getBooleanExtra("auto_record", false) == true) {
+            if (checkPermission() && !isRecording) startRecording()
+            return
+        }
         val claudeStatus = wsClient.claudeState.value.status
-        val isConnected = wsClient.connectionStatus.value == ConnectionStatus.CONNECTED
         when {
             isPlayingAudio -> onPauseClick()
             claudeStatus == "thinking" -> onAbortClick()
             isRecording -> stopRecordingAndSend()
-            isConnected && checkPermission() -> startRecording()
         }
     }
 

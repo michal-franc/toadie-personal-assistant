@@ -41,6 +41,9 @@ Thumbs.db
 *.apk
 *.aab
 
+# Git worktrees
+worktrees/
+
 # Logs
 *.log
 excalidraw.log
