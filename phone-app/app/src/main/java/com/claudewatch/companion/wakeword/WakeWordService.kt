@@ -65,6 +65,17 @@ class WakeWordService : Service() {
             val intent = Intent(context, WakeWordService::class.java)
             context.stopService(intent)
         }
+
+        /** Stop recording and send immediately. Only acts when state is RECORDING. */
+        fun requestStopRecording() {
+            if (_wakeWordState.value != WakeWordState.RECORDING) return
+            Log.i(TAG, "requestStopRecording: tap-to-stop triggered")
+            instance?.scope?.launch(Dispatchers.Main) {
+                instance?.stopRecordingAndSend()
+            }
+        }
+
+        private var instance: WakeWordService? = null
     }
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -83,6 +94,7 @@ class WakeWordService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Listening for wake word..."))
         startPorcupine()
@@ -90,6 +102,7 @@ class WakeWordService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        instance = null
         silenceJob?.cancel()
         stopRecorderSafely()
         stopPorcupineSafely()

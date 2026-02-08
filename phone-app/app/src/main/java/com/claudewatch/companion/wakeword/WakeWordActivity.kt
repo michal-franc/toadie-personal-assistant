@@ -9,6 +9,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -58,6 +59,14 @@ class WakeWordActivity : AppCompatActivity() {
         creatureView = findViewById(R.id.creature_view)
         statusText = findViewById(R.id.status_text)
         audioWave = findViewById(R.id.audio_wave)
+
+        // Tap anywhere to stop recording and send immediately
+        findViewById<LinearLayout>(R.id.root_layout).setOnClickListener {
+            if (WakeWordService.wakeWordState.value == WakeWordState.RECORDING) {
+                Log.i(TAG, "Tap-to-stop: user tapped overlay during recording")
+                WakeWordService.requestStopRecording()
+            }
+        }
 
         // Safety timeout
         timeoutHandler.postDelayed(timeoutRunnable, 35_000L)
