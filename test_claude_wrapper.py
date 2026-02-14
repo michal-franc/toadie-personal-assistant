@@ -1,343 +1,550 @@
-"""Unit tests for claude_wrapper.py"""
+"""Unit tests for claude_wrapper.py (ClaudeTmuxSession + JsonlWatcher)"""
 
-import json
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_wrapper import ClaudeWrapper
+from claude_wrapper import ClaudeTmuxSession, ClaudeWrapper, JsonlWatcher
 
 
-class TestClaudeWrapperInit:
-    """Tests for ClaudeWrapper initialization"""
+class TestBackwardCompatAlias:
+    """ClaudeWrapper should be an alias for ClaudeTmuxSession"""
+
+    def test_alias_points_to_new_class(self):
+        assert ClaudeWrapper is ClaudeTmuxSession
+
+
+class TestClaudeTmuxSessionInit:
+    """Tests for ClaudeTmuxSession initialization"""
 
     def test_init_sets_workdir(self):
-        """Should set working directory"""
-        wrapper = ClaudeWrapper("/home/user/project")
-        assert wrapper.workdir == "/home/user/project"
+        session = ClaudeTmuxSession("/home/user/project")
+        assert session.workdir == "/home/user/project"
 
     def test_init_sets_model(self):
-        """Should set model when provided"""
-        wrapper = ClaudeWrapper("/tmp", model="opus")
-        assert wrapper.model == "opus"
+        session = ClaudeTmuxSession("/tmp", model="opus")
+        assert session.model == "opus"
 
     def test_init_no_model(self):
-        """Should have None model when not provided"""
-        wrapper = ClaudeWrapper("/tmp")
-        assert wrapper.model is None
+        session = ClaudeTmuxSession("/tmp")
+        assert session.model is None
 
-    def test_init_no_process(self):
-        """Should start with no process"""
-        wrapper = ClaudeWrapper("/tmp")
-        assert wrapper.process is None
-        assert wrapper.session_id is None
+    def test_init_no_session_id(self):
+        session = ClaudeTmuxSession("/tmp")
+        assert session.session_id is None
 
 
-class TestClaudeWrapperSingleton:
+class TestClaudeTmuxSessionSingleton:
     """Tests for singleton pattern"""
 
     def teardown_method(self):
-        """Reset singleton after each test"""
-        ClaudeWrapper._instance = None
+        ClaudeTmuxSession._instance = None
 
-    def test_get_instance_creates_new(self):
-        """Should create new instance when none exists"""
-        wrapper = ClaudeWrapper.get_instance("/tmp")
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=False)
+    def test_get_instance_creates_new(self, mock_alive):
+        wrapper = ClaudeTmuxSession.get_instance("/tmp")
         assert wrapper is not None
-        assert ClaudeWrapper._instance is wrapper
+        assert ClaudeTmuxSession._instance is wrapper
 
-    @patch.object(ClaudeWrapper, "is_alive", return_value=True)
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
     def test_get_instance_returns_existing(self, mock_alive):
-        """Should return existing instance"""
-        wrapper1 = ClaudeWrapper.get_instance("/tmp")
-        wrapper2 = ClaudeWrapper.get_instance("/tmp")
+        wrapper1 = ClaudeTmuxSession.get_instance("/tmp")
+        wrapper2 = ClaudeTmuxSession.get_instance("/tmp")
         assert wrapper1 is wrapper2
 
-    @patch.object(ClaudeWrapper, "is_alive", return_value=False)
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=False)
     def test_get_instance_creates_new_when_dead(self, mock_alive):
-        """Should create new instance when existing is dead"""
-        wrapper1 = ClaudeWrapper.get_instance("/tmp")
-        ClaudeWrapper._instance = wrapper1
+        wrapper1 = ClaudeTmuxSession.get_instance("/tmp")
+        ClaudeTmuxSession._instance = wrapper1
 
-        # Process is dead, should create new
-        wrapper2 = ClaudeWrapper.get_instance("/tmp")
+        wrapper2 = ClaudeTmuxSession.get_instance("/tmp")
         assert wrapper2 is not wrapper1
 
 
-class TestClaudeWrapperIsAlive:
+class TestClaudeTmuxSessionIsAlive:
     """Tests for is_alive method"""
 
-    def test_is_alive_no_process(self):
-        """Should return False when no process"""
-        wrapper = ClaudeWrapper("/tmp")
-        assert wrapper.is_alive() is False
+    @patch("claude_wrapper.subprocess.run")
+    def test_is_alive_when_tmux_exists(self, mock_run):
+        mock_run.return_value.returncode = 0
+        session = ClaudeTmuxSession("/tmp")
+        assert session.is_alive() is True
+        mock_run.assert_called_with(
+            ["tmux", "has-session", "-t", "claude-watch"],
+            capture_output=True,
+        )
 
-    def test_is_alive_process_running(self):
-        """Should return True when process is running"""
-        wrapper = ClaudeWrapper("/tmp")
-        wrapper.process = MagicMock()
-        wrapper.process.poll.return_value = None  # None means still running
-        assert wrapper.is_alive() is True
-
-    def test_is_alive_process_exited(self):
-        """Should return False when process has exited"""
-        wrapper = ClaudeWrapper("/tmp")
-        wrapper.process = MagicMock()
-        wrapper.process.poll.return_value = 0  # Exit code means finished
-        assert wrapper.is_alive() is False
+    @patch("claude_wrapper.subprocess.run")
+    def test_is_alive_when_tmux_missing(self, mock_run):
+        mock_run.return_value.returncode = 1
+        session = ClaudeTmuxSession("/tmp")
+        assert session.is_alive() is False
 
 
-class TestClaudeWrapperStartProcess:
-    """Tests for _start_process method"""
+class TestClaudeTmuxSessionStartSession:
+    """Tests for _start_session method"""
 
     def teardown_method(self):
-        ClaudeWrapper._instance = None
+        ClaudeTmuxSession._instance = None
 
-    @patch("claude_wrapper.subprocess.Popen")
+    @patch.object(ClaudeTmuxSession, "_discover_session_id")
+    @patch("claude_wrapper.get_projects_dir")
     @patch("claude_wrapper.subprocess.run")
-    def test_start_process_creates_popen(self, mock_run, mock_popen):
-        """Should create subprocess with correct args"""
-        mock_run.return_value.returncode = 0  # tmux session exists
-        mock_popen.return_value.pid = 12345
+    def test_start_session_creates_tmux(self, mock_run, mock_projects_dir, mock_discover):
+        # First call: has-session returns 1 (not running)
+        # Second call: new-session returns 0
+        mock_run.return_value.returncode = 1
 
-        wrapper = ClaudeWrapper("/tmp")
-        wrapper._start_process()
+        session = ClaudeTmuxSession("/tmp/project")
+        session._start_session()
 
-        mock_popen.assert_called_once()
-        call_args = mock_popen.call_args
-        cmd = call_args[0][0]
+        # Check that tmux new-session was called
+        calls = mock_run.call_args_list
+        # First call is is_alive check (has-session), second is new-session
+        new_session_call = calls[1]
+        cmd = new_session_call[0][0]
 
+        assert "tmux" in cmd
+        assert "new-session" in cmd
+        assert "-d" in cmd
+        assert "-s" in cmd
+        assert "claude-watch" in cmd
         assert "claude" in cmd
-        assert "-p" in cmd
-        assert "--input-format" in cmd
-        assert "stream-json" in cmd
-        assert "--output-format" in cmd
 
-    @patch("claude_wrapper.subprocess.Popen")
+    @patch.object(ClaudeTmuxSession, "_discover_session_id")
+    @patch("claude_wrapper.get_projects_dir")
     @patch("claude_wrapper.subprocess.run")
-    def test_start_process_sets_env_marker(self, mock_run, mock_popen):
-        """Should set CLAUDE_WATCH_SESSION env var"""
-        mock_run.return_value.returncode = 0
-        mock_popen.return_value.pid = 12345
+    def test_start_session_passes_env(self, mock_run, mock_projects_dir, mock_discover):
+        mock_run.return_value.returncode = 1
 
-        wrapper = ClaudeWrapper("/tmp")
-        wrapper._start_process()
+        session = ClaudeTmuxSession("/tmp")
+        session._start_session()
 
-        call_args = mock_popen.call_args
-        env = call_args[1].get("env", {})
-        assert env.get("CLAUDE_WATCH_SESSION") == "1"
+        calls = mock_run.call_args_list
+        new_session_call = calls[1]
+        cmd = new_session_call[0][0]
 
-    @patch("claude_wrapper.subprocess.Popen")
+        # Should include -e CLAUDE_WATCH_SESSION=1
+        assert "-e" in cmd
+        assert "CLAUDE_WATCH_SESSION=1" in cmd
+
+    @patch.object(ClaudeTmuxSession, "_discover_session_id")
+    @patch("claude_wrapper.get_projects_dir")
     @patch("claude_wrapper.subprocess.run")
-    def test_start_process_includes_model(self, mock_run, mock_popen):
-        """Should include model flag when specified"""
-        mock_run.return_value.returncode = 0
-        mock_popen.return_value.pid = 12345
+    def test_start_session_includes_model(self, mock_run, mock_projects_dir, mock_discover):
+        mock_run.return_value.returncode = 1
 
-        wrapper = ClaudeWrapper("/tmp", model="opus")
-        wrapper._start_process()
+        session = ClaudeTmuxSession("/tmp", model="opus")
+        session._start_session()
 
-        call_args = mock_popen.call_args
-        cmd = call_args[0][0]
+        calls = mock_run.call_args_list
+        new_session_call = calls[1]
+        cmd = new_session_call[0][0]
+
         assert "--model" in cmd
         assert "opus" in cmd
 
-    @patch.object(ClaudeWrapper, "is_alive", return_value=True)
-    def test_start_process_noop_when_alive(self, mock_alive):
-        """Should not start new process when already running"""
-        wrapper = ClaudeWrapper("/tmp")
-        wrapper.process = MagicMock()
-
-        with patch("claude_wrapper.subprocess.Popen") as mock_popen:
-            wrapper._start_process()
-            mock_popen.assert_not_called()
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
+    @patch("claude_wrapper.subprocess.run")
+    def test_start_session_noop_when_alive(self, mock_run, mock_alive):
+        session = ClaudeTmuxSession("/tmp")
+        session._start_session()
+        # subprocess.run should not be called (is_alive is patched)
+        mock_run.assert_not_called()
 
 
-class TestClaudeWrapperRun:
+class TestClaudeTmuxSessionSendPrompt:
+    """Tests for _send_prompt_via_tmux"""
+
+    @patch("claude_wrapper.subprocess.run")
+    def test_send_prompt_uses_load_buffer(self, mock_run):
+        session = ClaudeTmuxSession("/tmp")
+
+        with patch("builtins.open", create=True) as mock_open:
+            mock_file = MagicMock()
+            mock_open.return_value.__enter__ = MagicMock(return_value=mock_file)
+            mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+            session._send_prompt_via_tmux("test prompt")
+
+        # Should make 3 subprocess calls: load-buffer, paste-buffer, send-keys Enter
+        assert mock_run.call_count == 3
+
+        load_call = mock_run.call_args_list[0][0][0]
+        assert "load-buffer" in load_call
+
+        paste_call = mock_run.call_args_list[1][0][0]
+        assert "paste-buffer" in paste_call
+
+        enter_call = mock_run.call_args_list[2][0][0]
+        assert "send-keys" in enter_call
+        assert "Enter" in enter_call
+
+
+class TestClaudeTmuxSessionRun:
     """Tests for run method"""
 
     def teardown_method(self):
-        ClaudeWrapper._instance = None
+        ClaudeTmuxSession._instance = None
 
-    @patch.object(ClaudeWrapper, "_start_process")
-    @patch.object(ClaudeWrapper, "_process_output")
-    @patch.object(ClaudeWrapper, "is_alive", return_value=True)
-    @patch.object(ClaudeWrapper, "_write_to_log")
-    def test_run_sends_json_message(self, mock_log, mock_alive, mock_process, mock_start):
-        """Should send prompt as JSON to stdin"""
-        mock_process.return_value = "response"
+    @patch.object(ClaudeTmuxSession, "_update_usage")
+    @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.find_latest_session", return_value=None)
+    @patch("claude_wrapper.get_jsonl_line_count", return_value=5)
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
+    @patch.object(ClaudeTmuxSession, "_start_session")
+    def test_run_raises_when_no_session_id(
+        self, mock_start, mock_alive, mock_count, mock_latest, mock_send, mock_usage
+    ):
+        session = ClaudeTmuxSession("/tmp")
+        session.session_id = None
 
-        wrapper = ClaudeWrapper("/tmp")
-        wrapper.process = MagicMock()
-        wrapper.process.stdin = MagicMock()
+        with pytest.raises(RuntimeError, match="No session ID"):
+            session.run("test")
 
-        wrapper.run("test prompt")
-
-        # Check JSON was written to stdin
-        write_calls = wrapper.process.stdin.write.call_args_list
-        assert len(write_calls) > 0
-
-        written = write_calls[0][0][0]
-        msg = json.loads(written.strip())
-        assert msg["type"] == "user"
-        assert msg["message"]["role"] == "user"
-        assert msg["message"]["content"] == "test prompt"
-
-    @patch.object(ClaudeWrapper, "_start_process")
-    @patch.object(ClaudeWrapper, "is_alive", return_value=False)
-    def test_run_raises_when_process_fails(self, mock_alive, mock_start):
-        """Should raise error when process fails to start"""
-        wrapper = ClaudeWrapper("/tmp")
+    @patch.object(ClaudeTmuxSession, "_update_usage")
+    @patch.object(ClaudeTmuxSession, "_start_session")
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=False)
+    def test_run_raises_when_session_fails(self, mock_alive, mock_start, mock_usage):
+        session = ClaudeTmuxSession("/tmp")
 
         with pytest.raises(RuntimeError, match="Failed to start"):
-            wrapper.run("test")
+            session.run("test")
 
 
-class TestClaudeWrapperUsageTracking:
+class TestClaudeTmuxSessionUsageTracking:
     """Tests for usage/context tracking"""
 
     def test_init_usage_defaults(self):
-        """Should initialize with default usage values"""
-        wrapper = ClaudeWrapper("/tmp")
-        assert wrapper.last_usage is None
-        assert wrapper.total_cost_usd == 0.0
-        assert wrapper.context_window == 200000
+        session = ClaudeTmuxSession("/tmp")
+        assert session.last_usage is None
+        assert session.total_cost_usd == 0.0
+        assert session.context_window == 200000
+
+    @patch("claude_wrapper.read_context_usage")
+    def test_update_usage_fires_callback(self, mock_read):
+        mock_read.return_value = {
+            "input_tokens": 1000,
+            "cache_read_input_tokens": 5000,
+            "cache_creation_input_tokens": 200,
+            "output_tokens": 100,
+        }
+
+        session = ClaudeTmuxSession("/tmp")
+        session.session_id = "test-session"
+        callback = MagicMock()
+
+        session._update_usage(on_usage=callback)
+
+        callback.assert_called_once()
+        usage = callback.call_args[0][0]
+        assert usage["input_tokens"] == 1000
+        assert usage["total_context"] == 6200  # 1000 + 5000 + 200
+        assert usage["context_window"] == 200000
+
+    @patch("claude_wrapper.read_context_usage", return_value=None)
+    def test_update_usage_noop_when_no_transcript(self, mock_read):
+        session = ClaudeTmuxSession("/tmp")
+        session.session_id = "test-session"
+        callback = MagicMock()
+
+        session._update_usage(on_usage=callback)
+
+        callback.assert_not_called()
 
 
-class TestClaudeWrapperFormatTerminal:
-    """Tests for _format_for_terminal method"""
-
-    def test_format_system_init(self):
-        """Should format system init message"""
-        wrapper = ClaudeWrapper("/tmp")
-        msg = json.dumps({"type": "system", "subtype": "init"})
-        result = wrapper._format_for_terminal(msg)
-        assert "init" in result
-        assert "Session started" in result
-
-    def test_format_bash_tool(self):
-        """Should format Bash tool nicely"""
-        wrapper = ClaudeWrapper("/tmp")
-        msg = json.dumps(
-            {
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {
-                            "type": "tool_use",
-                            "name": "Bash",
-                            "input": {"command": "ls -la", "description": "List files"},
-                        }
-                    ]
-                },
-            }
-        )
-        result = wrapper._format_for_terminal(msg)
-        assert "BASH" in result
-        assert "ls -la" in result
-        assert "List files" in result
-
-    def test_format_edit_tool(self):
-        """Should format Edit tool with diff preview"""
-        wrapper = ClaudeWrapper("/tmp")
-        msg = json.dumps(
-            {
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {
-                            "type": "tool_use",
-                            "name": "Edit",
-                            "input": {"file_path": "/tmp/test.py", "old_string": "old code", "new_string": "new code"},
-                        }
-                    ]
-                },
-            }
-        )
-        result = wrapper._format_for_terminal(msg)
-        assert "EDIT" in result
-        assert "/tmp/test.py" in result
-        assert "old code" in result
-        assert "new code" in result
-
-    def test_format_tool_result_success(self):
-        """Should format successful tool result"""
-        wrapper = ClaudeWrapper("/tmp")
-        msg = json.dumps(
-            {
-                "type": "user",
-                "message": {"content": [{"type": "tool_result", "content": "file created", "is_error": False}]},
-            }
-        )
-        result = wrapper._format_for_terminal(msg)
-        assert "✓" in result
-
-    def test_format_tool_result_error(self):
-        """Should format error tool result"""
-        wrapper = ClaudeWrapper("/tmp")
-        msg = json.dumps(
-            {
-                "type": "user",
-                "message": {"content": [{"type": "tool_result", "content": "Permission denied", "is_error": True}]},
-            }
-        )
-        result = wrapper._format_for_terminal(msg)
-        assert "ERROR" in result
-
-    def test_format_result_with_usage(self):
-        """Should format result with context info"""
-        wrapper = ClaudeWrapper("/tmp")
-        msg = json.dumps(
-            {
-                "type": "result",
-                "result": "Done!",
-                "usage": {"input_tokens": 100, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 1000},
-                "total_cost_usd": 0.05,
-            }
-        )
-        result = wrapper._format_for_terminal(msg)
-        assert "DONE" in result
-        assert "6,100" in result  # total context
-        assert "0.05" in result
-
-    def test_format_invalid_json(self):
-        """Should return original line for invalid JSON"""
-        wrapper = ClaudeWrapper("/tmp")
-        result = wrapper._format_for_terminal("not json")
-        assert result == "not json"
-
-
-class TestClaudeWrapperCancel:
+class TestClaudeTmuxSessionCancel:
     """Tests for cancel method"""
 
-    def test_cancel_terminates_process(self):
-        """Should terminate running process"""
-        wrapper = ClaudeWrapper("/tmp")
-        mock_process = MagicMock()
-        wrapper.process = mock_process
+    @patch("claude_wrapper.subprocess.run")
+    def test_cancel_sends_ctrl_c(self, mock_run):
+        # First call (is_alive check) returns success
+        mock_run.return_value.returncode = 0
 
-        wrapper.cancel()
+        session = ClaudeTmuxSession("/tmp")
+        session.cancel()
 
-        mock_process.terminate.assert_called_once()
-        assert wrapper.process is None
+        # Should have called has-session and then send-keys C-c
+        assert mock_run.call_count == 2
+        cancel_call = mock_run.call_args_list[1][0][0]
+        assert "send-keys" in cancel_call
+        assert "C-c" in cancel_call
 
-    def test_cancel_noop_no_process(self):
-        """Should do nothing when no process"""
-        wrapper = ClaudeWrapper("/tmp")
-        wrapper.cancel()  # Should not raise
+    @patch("claude_wrapper.subprocess.run")
+    def test_cancel_noop_when_not_alive(self, mock_run):
+        mock_run.return_value.returncode = 1  # session doesn't exist
+        session = ClaudeTmuxSession("/tmp")
+        session.cancel()
+
+        # Only has-session check, no send-keys
+        assert mock_run.call_count == 1
 
 
-class TestClaudeWrapperShutdown:
+class TestClaudeTmuxSessionShutdown:
     """Tests for shutdown method"""
 
     def teardown_method(self):
-        ClaudeWrapper._instance = None
+        ClaudeTmuxSession._instance = None
 
-    def test_shutdown_clears_singleton(self):
-        """Should clear singleton instance"""
-        wrapper = ClaudeWrapper.get_instance("/tmp")
-        assert ClaudeWrapper._instance is not None
+    @patch("claude_wrapper.subprocess.run")
+    def test_shutdown_kills_session(self, mock_run):
+        mock_run.return_value.returncode = 0  # session exists
 
+        wrapper = ClaudeTmuxSession.get_instance("/tmp")
         wrapper.shutdown()
 
-        assert ClaudeWrapper._instance is None
+        # Should have called kill-session
+        kill_calls = [c for c in mock_run.call_args_list if "kill-session" in c[0][0]]
+        assert len(kill_calls) == 1
+        assert ClaudeTmuxSession._instance is None
+
+    @patch("claude_wrapper.subprocess.run")
+    def test_shutdown_clears_singleton_even_when_dead(self, mock_run):
+        mock_run.return_value.returncode = 1  # session doesn't exist
+
+        ClaudeTmuxSession._instance = ClaudeTmuxSession("/tmp")
+        ClaudeTmuxSession._instance.shutdown()
+
+        assert ClaudeTmuxSession._instance is None
+
+
+class TestJsonlWatcher:
+    """Tests for JsonlWatcher"""
+
+    def test_init(self):
+        watcher = JsonlWatcher("/tmp", "session-1", 0)
+        assert watcher.workdir == "/tmp"
+        assert watcher.session_id == "session-1"
+        assert watcher.current_line == 0
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_returns_false_no_entries(self, mock_read):
+        mock_read.return_value = []
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        assert watcher.poll() is False
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_fires_on_text(self, mock_read):
+        mock_read.return_value = [
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "Hello world"}]},
+            }
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        text_cb = MagicMock()
+        result = watcher.poll(on_text=text_cb)
+
+        assert result is True
+        text_cb.assert_called_once_with("Hello world")
+        assert watcher.current_line == 1
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_fires_on_tool(self, mock_read):
+        mock_read.return_value = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
+                    ]
+                },
+            }
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        tool_cb = MagicMock()
+        result = watcher.poll(on_tool=tool_cb)
+
+        assert result is True
+        tool_cb.assert_called_once_with("Bash", {"command": "ls"})
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_skips_noise_types(self, mock_read):
+        mock_read.return_value = [
+            {"type": "file-history-snapshot", "data": {}},
+            {"type": "change", "data": {}},
+            {"type": "queue-operation", "data": {}},
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        text_cb = MagicMock()
+        result = watcher.poll(on_text=text_cb)
+
+        assert result is False
+        text_cb.assert_not_called()
+        # But line count still advances
+        assert watcher.current_line == 3
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_skips_sidechain(self, mock_read):
+        mock_read.return_value = [
+            {
+                "type": "assistant",
+                "isSidechain": True,
+                "message": {"content": [{"type": "text", "text": "sidechain text"}]},
+            }
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        text_cb = MagicMock()
+        result = watcher.poll(on_text=text_cb)
+
+        assert result is False
+        text_cb.assert_not_called()
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_advances_line_count(self, mock_read):
+        mock_read.return_value = [
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "a"}]}},
+            {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}},
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 5)
+        watcher.poll(on_text=MagicMock())
+
+        assert watcher.current_line == 7
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_skips_empty_text(self, mock_read):
+        mock_read.return_value = [
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": ""}]}},
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        text_cb = MagicMock()
+        result = watcher.poll(on_text=text_cb)
+
+        assert result is False
+        text_cb.assert_not_called()
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_fires_on_user_message_string(self, mock_read):
+        mock_read.return_value = [
+            {"type": "user", "message": {"content": "hello from tmux"}},
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        user_cb = MagicMock()
+        result = watcher.poll(on_user_message=user_cb)
+
+        assert result is True
+        user_cb.assert_called_once_with("hello from tmux")
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_fires_on_user_message_text_item(self, mock_read):
+        mock_read.return_value = [
+            {"type": "user", "message": {"content": [{"type": "text", "text": "typed prompt"}]}},
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        user_cb = MagicMock()
+        result = watcher.poll(on_user_message=user_cb)
+
+        assert result is True
+        user_cb.assert_called_once_with("typed prompt")
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_does_not_fire_user_message_for_tool_results(self, mock_read):
+        mock_read.return_value = [
+            {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}},
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        user_cb = MagicMock()
+        watcher.poll(on_user_message=user_cb)
+
+        user_cb.assert_not_called()
+
+
+class TestClaudeTmuxSessionRegisterCallbacks:
+    """Tests for register_callbacks"""
+
+    def test_register_stores_all_callbacks(self):
+        session = ClaudeTmuxSession("/tmp")
+        on_text = MagicMock()
+        on_tool = MagicMock()
+        on_user = MagicMock()
+        on_usage = MagicMock()
+        on_turn = MagicMock()
+
+        session.register_callbacks(
+            on_text=on_text,
+            on_tool=on_tool,
+            on_user_message=on_user,
+            on_usage=on_usage,
+            on_turn_complete=on_turn,
+        )
+
+        assert session._callbacks["on_text"] is on_text
+        assert session._callbacks["on_tool"] is on_tool
+        assert session._callbacks["on_user_message"] is on_user
+        assert session._callbacks["on_usage"] is on_usage
+        assert session._callbacks["on_turn_complete"] is on_turn
+
+    def test_register_allows_partial(self):
+        session = ClaudeTmuxSession("/tmp")
+        on_text = MagicMock()
+
+        session.register_callbacks(on_text=on_text)
+
+        assert session._callbacks["on_text"] is on_text
+        assert session._callbacks["on_tool"] is None
+
+
+class TestClaudeTmuxSessionBackgroundWatcher:
+    """Tests for start_background_watcher"""
+
+    def test_starts_daemon_thread(self):
+        session = ClaudeTmuxSession("/tmp")
+
+        with patch.object(session, "_background_watcher_loop"):
+            session.start_background_watcher()
+
+        assert session._watcher_running is True
+        assert session._watcher_thread is not None
+        assert session._watcher_thread.daemon is True
+
+        session._watcher_running = False
+
+    def test_noop_when_already_running(self):
+        session = ClaudeTmuxSession("/tmp")
+
+        keep_alive = threading.Event()
+
+        def fake_loop():
+            keep_alive.wait(timeout=5)
+
+        with patch.object(session, "_background_watcher_loop", side_effect=fake_loop):
+            session.start_background_watcher()
+            first_thread = session._watcher_thread
+            session.start_background_watcher()
+            assert session._watcher_thread is first_thread
+
+        session._watcher_running = False
+        keep_alive.set()
+
+
+class TestClaudeTmuxSessionInitState:
+    """Tests for new init state"""
+
+    def test_init_watcher_state(self):
+        session = ClaudeTmuxSession("/tmp")
+        assert session._callbacks == {}
+        assert session._watcher_thread is None
+        assert session._watcher_running is False
+        assert session._pending_text == []
+        assert not session._turn_complete.is_set()
+        assert session._server_prompt_active is False
+
+    def test_shutdown_stops_watcher(self):
+        session = ClaudeTmuxSession("/tmp")
+        session._watcher_running = True
+
+        with patch("claude_wrapper.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 1  # session doesn't exist
+            session.shutdown()
+
+        assert session._watcher_running is False

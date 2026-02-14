@@ -1,10 +1,18 @@
 """Unit tests for transcript_reader.py"""
 
 import json
+import time
 from pathlib import Path
 from unittest.mock import patch
 
-from transcript_reader import get_transcript_path, read_context_usage
+from transcript_reader import (
+    find_latest_session,
+    get_jsonl_line_count,
+    get_projects_dir,
+    get_transcript_path,
+    read_context_usage,
+    read_new_entries,
+)
 
 
 class TestGetTranscriptPath:
@@ -277,3 +285,143 @@ class TestReadContextUsage:
             result = read_context_usage("/fake/dir", "sess")
 
         assert result is None
+
+
+class TestGetProjectsDir:
+    """Tests for get_projects_dir"""
+
+    def test_returns_path(self):
+        result = get_projects_dir("/home/user/project")
+        assert result == Path.home() / ".claude/projects/-home-user-project"
+
+    def test_consistent_with_get_transcript_path(self):
+        projects_dir = get_projects_dir("/home/user/project")
+        transcript = get_transcript_path("/home/user/project", "sess-1")
+        assert transcript.parent == projects_dir
+
+
+class TestFindLatestSession:
+    """Tests for find_latest_session"""
+
+    def test_returns_none_for_missing_dir(self):
+        with patch("transcript_reader.get_projects_dir", return_value=Path("/nonexistent/dir")):
+            result = find_latest_session("/fake")
+        assert result is None
+
+    def test_returns_none_for_empty_dir(self, tmp_path):
+        with patch("transcript_reader.get_projects_dir", return_value=tmp_path):
+            result = find_latest_session("/fake")
+        assert result is None
+
+    def test_returns_latest_by_mtime(self, tmp_path):
+        # Create older file
+        old = tmp_path / "old-session.jsonl"
+        old.write_text('{"type": "user"}\n')
+
+        # Small delay to ensure different mtime
+        time.sleep(0.05)
+
+        # Create newer file
+        new = tmp_path / "new-session.jsonl"
+        new.write_text('{"type": "user"}\n')
+
+        with patch("transcript_reader.get_projects_dir", return_value=tmp_path):
+            result = find_latest_session("/fake")
+
+        assert result == "new-session"
+
+    def test_returns_stem_without_extension(self, tmp_path):
+        (tmp_path / "abc-123-456.jsonl").write_text("")
+
+        with patch("transcript_reader.get_projects_dir", return_value=tmp_path):
+            result = find_latest_session("/fake")
+
+        assert result == "abc-123-456"
+
+
+class TestGetJsonlLineCount:
+    """Tests for get_jsonl_line_count"""
+
+    def test_returns_zero_for_missing_file(self):
+        fake_path = Path("/nonexistent/sess.jsonl")
+        with patch("transcript_reader.get_transcript_path", return_value=fake_path):
+            result = get_jsonl_line_count("/fake", "sess")
+        assert result == 0
+
+    def test_counts_lines(self, tmp_path):
+        transcript = tmp_path / "sess.jsonl"
+        transcript.write_text("line1\nline2\nline3\n")
+
+        with patch("transcript_reader.get_transcript_path", return_value=transcript):
+            result = get_jsonl_line_count("/fake", "sess")
+
+        assert result == 3
+
+    def test_empty_file(self, tmp_path):
+        transcript = tmp_path / "sess.jsonl"
+        transcript.write_text("")
+
+        with patch("transcript_reader.get_transcript_path", return_value=transcript):
+            result = get_jsonl_line_count("/fake", "sess")
+
+        assert result == 0
+
+
+class TestReadNewEntries:
+    """Tests for read_new_entries"""
+
+    def test_reads_all_from_start(self, tmp_path):
+        transcript = tmp_path / "sess.jsonl"
+        entries = [
+            json.dumps({"type": "user", "message": "hello"}),
+            json.dumps({"type": "assistant", "message": "world"}),
+        ]
+        transcript.write_text("\n".join(entries) + "\n")
+
+        with patch("transcript_reader.get_transcript_path", return_value=transcript):
+            result = read_new_entries("/fake", "sess", 0)
+
+        assert len(result) == 2
+        assert result[0]["type"] == "user"
+        assert result[1]["type"] == "assistant"
+
+    def test_reads_from_offset(self, tmp_path):
+        transcript = tmp_path / "sess.jsonl"
+        entries = [
+            json.dumps({"type": "user", "n": 1}),
+            json.dumps({"type": "user", "n": 2}),
+            json.dumps({"type": "assistant", "n": 3}),
+        ]
+        transcript.write_text("\n".join(entries) + "\n")
+
+        with patch("transcript_reader.get_transcript_path", return_value=transcript):
+            result = read_new_entries("/fake", "sess", 2)
+
+        assert len(result) == 1
+        assert result[0]["n"] == 3
+
+    def test_returns_empty_past_end(self, tmp_path):
+        transcript = tmp_path / "sess.jsonl"
+        transcript.write_text(json.dumps({"type": "user"}) + "\n")
+
+        with patch("transcript_reader.get_transcript_path", return_value=transcript):
+            result = read_new_entries("/fake", "sess", 10)
+
+        assert result == []
+
+    def test_skips_blank_and_invalid_lines(self, tmp_path):
+        transcript = tmp_path / "sess.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "user"}) + "\n" + "\n" + "invalid json\n" + json.dumps({"type": "assistant"}) + "\n"
+        )
+
+        with patch("transcript_reader.get_transcript_path", return_value=transcript):
+            result = read_new_entries("/fake", "sess", 0)
+
+        assert len(result) == 2
+
+    def test_returns_empty_for_missing_file(self):
+        fake_path = Path("/nonexistent/sess.jsonl")
+        with patch("transcript_reader.get_transcript_path", return_value=fake_path):
+            result = read_new_entries("/fake", "sess", 0)
+        assert result == []
