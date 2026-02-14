@@ -196,12 +196,13 @@ class TestClaudeTmuxSessionRun:
 
     @patch.object(ClaudeTmuxSession, "_update_usage")
     @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.session_file_exists", return_value=False)
     @patch("claude_wrapper.find_latest_session", return_value=None)
     @patch("claude_wrapper.get_jsonl_line_count", return_value=5)
     @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
     @patch.object(ClaudeTmuxSession, "_start_session")
     def test_run_raises_when_no_session_id(
-        self, mock_start, mock_alive, mock_count, mock_latest, mock_send, mock_usage
+        self, mock_start, mock_alive, mock_count, mock_latest, mock_exists, mock_send, mock_usage
     ):
         session = ClaudeTmuxSession("/tmp")
         session.session_id = None
@@ -601,10 +602,13 @@ class TestPollLoops:
         ClaudeTmuxSession._instance = None
 
     @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.session_file_exists", return_value=True)
     @patch("claude_wrapper.find_latest_session", return_value="sess-1")
     @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
     @patch.object(ClaudeTmuxSession, "_start_session")
-    def test_startup_wait_returns_early_when_jsonl_ready(self, mock_start, mock_alive, mock_latest, mock_send):
+    def test_startup_wait_returns_early_when_jsonl_ready(
+        self, mock_start, mock_alive, mock_latest, mock_exists, mock_send
+    ):
         """When JSONL becomes non-empty quickly, don't wait the full STARTUP_WAIT."""
         call_count = 0
 
@@ -630,11 +634,14 @@ class TestPollLoops:
         assert elapsed < STARTUP_WAIT / 2
 
     @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.session_file_exists", return_value=True)
     @patch("claude_wrapper.find_latest_session", return_value="sess-1")
     @patch("claude_wrapper.get_jsonl_line_count", return_value=0)
     @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
     @patch.object(ClaudeTmuxSession, "_start_session")
-    def test_startup_wait_uses_full_deadline(self, mock_start, mock_alive, mock_count, mock_latest, mock_send):
+    def test_startup_wait_uses_full_deadline(
+        self, mock_start, mock_alive, mock_count, mock_latest, mock_exists, mock_send
+    ):
         """When JSONL never gets entries, wait the full STARTUP_WAIT deadline."""
         session = ClaudeTmuxSession("/tmp")
         session.session_id = "sess-1"
@@ -651,18 +658,18 @@ class TestPollLoops:
         assert elapsed >= STARTUP_WAIT * 0.9
 
     @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.session_file_exists", return_value=True)
     @patch("claude_wrapper.get_jsonl_line_count", return_value=5)
     @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
     @patch.object(ClaudeTmuxSession, "_start_session")
-    def test_post_prompt_returns_early_on_session_change(self, mock_start, mock_alive, mock_count, mock_send):
+    def test_post_prompt_returns_early_on_session_change(
+        self, mock_start, mock_alive, mock_count, mock_exists, mock_send
+    ):
         """When session ID changes after prompt, detect it quickly."""
-        call_count = 0
 
         def mock_latest(workdir):
-            nonlocal call_count
-            call_count += 1
-            # First call in run() returns sess-1, post-prompt calls return sess-2
-            return "sess-1" if call_count <= 1 else "sess-2"
+            # Post-prompt calls detect new session
+            return "sess-2"
 
         session = ClaudeTmuxSession("/tmp")
         session.session_id = "sess-1"
@@ -681,10 +688,13 @@ class TestPollLoops:
         assert session.session_id == "sess-2"
 
     @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.session_file_exists", return_value=True)
     @patch("claude_wrapper.find_latest_session", return_value="sess-1")
     @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
     @patch.object(ClaudeTmuxSession, "_start_session")
-    def test_post_prompt_returns_early_on_new_entries(self, mock_start, mock_alive, mock_latest, mock_send):
+    def test_post_prompt_returns_early_on_new_entries(
+        self, mock_start, mock_alive, mock_latest, mock_exists, mock_send
+    ):
         """When new JSONL entries appear after prompt, break early."""
         call_count = 0
 

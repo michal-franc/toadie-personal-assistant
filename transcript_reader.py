@@ -40,6 +40,15 @@ def get_transcript_path(workdir: str, session_id: str) -> Path:
     return get_projects_dir(workdir) / f"{session_id}.jsonl"
 
 
+def session_file_exists(workdir: str, session_id: str) -> bool:
+    """Check if a session JSONL file exists and is non-empty."""
+    path = get_transcript_path(workdir, session_id)
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def find_latest_session(workdir: str) -> str | None:
     """Find the most recently modified JSONL session file.
 

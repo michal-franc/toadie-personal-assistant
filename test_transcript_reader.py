@@ -12,6 +12,7 @@ from transcript_reader import (
     get_transcript_path,
     read_context_usage,
     read_new_entries,
+    session_file_exists,
 )
 
 
@@ -285,6 +286,29 @@ class TestReadContextUsage:
             result = read_context_usage("/fake/dir", "sess")
 
         assert result is None
+
+
+class TestSessionFileExists:
+    """Tests for session_file_exists"""
+
+    def test_returns_true_for_existing_nonempty_file(self, tmp_path):
+        transcript = tmp_path / "sess.jsonl"
+        transcript.write_text('{"type": "user"}\n')
+
+        with patch("transcript_reader.get_transcript_path", return_value=transcript):
+            assert session_file_exists("/fake", "sess") is True
+
+    def test_returns_false_for_missing_file(self):
+        fake_path = Path("/nonexistent/sess.jsonl")
+        with patch("transcript_reader.get_transcript_path", return_value=fake_path):
+            assert session_file_exists("/fake", "sess") is False
+
+    def test_returns_false_for_empty_file(self, tmp_path):
+        transcript = tmp_path / "sess.jsonl"
+        transcript.write_text("")
+
+        with patch("transcript_reader.get_transcript_path", return_value=transcript):
+            assert session_file_exists("/fake", "sess") is False
 
 
 class TestGetProjectsDir:
