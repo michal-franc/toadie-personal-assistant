@@ -384,7 +384,7 @@ class ClaudeTmuxSession:
         # Poll for new file
         deadline = time.time() + STARTUP_WAIT + 10
         while time.time() < deadline:
-            time.sleep(0.5)
+            time.sleep(0.1)
             if not projects_dir.is_dir():
                 continue
 
@@ -461,10 +461,14 @@ class ClaudeTmuxSession:
             if not self.session_id:
                 raise RuntimeError("No session ID discovered")
 
-            # Small delay to let the TUI be ready for input on first prompt
+            # Wait for TUI to be ready on first prompt (poll until JSONL has entries)
             start_line = get_jsonl_line_count(self.workdir, self.session_id)
             if start_line == 0:
-                time.sleep(STARTUP_WAIT)
+                deadline = time.time() + STARTUP_WAIT
+                while time.time() < deadline:
+                    if get_jsonl_line_count(self.workdir, self.session_id) > 0:
+                        break
+                    time.sleep(0.1)
 
             # Clear turn state and set server flag
             self._pending_text.clear()
@@ -502,9 +506,19 @@ class ClaudeTmuxSession:
             # Send prompt
             self._send_prompt_via_tmux(prompt)
 
-            # After sending, Claude may create a new JSONL file
-            time.sleep(1.0)
-            refreshed = find_latest_session(self.workdir)
+            # After sending, Claude may create a new JSONL file — poll for it
+            post_prompt_deadline = time.time() + 1.0
+            pre_prompt_line_count = get_jsonl_line_count(self.workdir, self.session_id)
+            refreshed = None
+            while time.time() < post_prompt_deadline:
+                refreshed = find_latest_session(self.workdir)
+                if refreshed and refreshed != self.session_id:
+                    break
+                # Also break if new entries appeared (Claude is processing)
+                if get_jsonl_line_count(self.workdir, self.session_id) > pre_prompt_line_count:
+                    refreshed = self.session_id
+                    break
+                time.sleep(0.1)
             if refreshed and refreshed != self.session_id:
                 logger.info(f"[TMUX] Session ID changed after prompt: {self.session_id} -> {refreshed}")
                 self.session_id = refreshed
