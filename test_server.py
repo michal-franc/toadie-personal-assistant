@@ -853,6 +853,181 @@ class TestConnectedClients:
         server.websocket_clients.clear()
 
 
+class TestSummarizeToolInput:
+    """Tests for _summarize_tool_input helper"""
+
+    def test_bash_returns_command(self):
+        result = server._summarize_tool_input("Bash", {"command": "ls -la /tmp"})
+        assert result == "ls -la /tmp"
+
+    def test_bash_truncates_long_command(self):
+        long_cmd = "x" * 100
+        result = server._summarize_tool_input("Bash", {"command": long_cmd})
+        assert len(result) <= 83  # 80 + "..."
+        assert result.endswith("...")
+
+    def test_read_returns_file_path(self):
+        result = server._summarize_tool_input("Read", {"file_path": "/tmp/test.py"})
+        assert result == "/tmp/test.py"
+
+    def test_write_returns_file_path(self):
+        result = server._summarize_tool_input("Write", {"file_path": "/tmp/out.txt"})
+        assert result == "/tmp/out.txt"
+
+    def test_edit_returns_file_path(self):
+        result = server._summarize_tool_input("Edit", {"file_path": "/tmp/edit.py"})
+        assert result == "/tmp/edit.py"
+
+    def test_glob_returns_pattern(self):
+        result = server._summarize_tool_input("Glob", {"pattern": "**/*.py"})
+        assert result == "**/*.py"
+
+    def test_grep_returns_pattern(self):
+        result = server._summarize_tool_input("Grep", {"pattern": "def main"})
+        assert result == "def main"
+
+    def test_task_returns_description(self):
+        result = server._summarize_tool_input("Task", {"description": "search code"})
+        assert result == "search code"
+
+    def test_webfetch_returns_url(self):
+        result = server._summarize_tool_input("WebFetch", {"url": "https://example.com"})
+        assert result == "https://example.com"
+
+    def test_unknown_tool_returns_first_string(self):
+        result = server._summarize_tool_input("Unknown", {"arg": "some value"})
+        assert result == "some value"
+
+    def test_non_dict_input(self):
+        result = server._summarize_tool_input("Bash", "not a dict")
+        assert result == ""
+
+    def test_empty_dict(self):
+        result = server._summarize_tool_input("Unknown", {})
+        assert result == ""
+
+
+class TestTerminalRequestTimeline:
+    """Tests for terminal request timeline tracking"""
+
+    def setup_method(self):
+        """Reset state before each test"""
+        server.request_history.clear()
+        server.terminal_request_id = None
+        server.claude_state["current_request_id"] = None
+        server.websocket_clients.clear()
+
+    def teardown_method(self):
+        """Clean up state after each test"""
+        server.request_history.clear()
+        server.terminal_request_id = None
+        server.claude_state["current_request_id"] = None
+
+    @patch("server.broadcast_message")
+    def test_on_user_message_creates_history_entry(self, mock_broadcast):
+        """on_user_message should create a request_history entry with Terminal step"""
+        wrapper = MagicMock()
+        wrapper.register_callbacks = MagicMock()
+        wrapper.start_background_watcher = MagicMock()
+
+        # Directly call what on_user_message does
+        # We need to extract the callback from init_claude_wrapper
+        callbacks = {}
+
+        def capture_callbacks(**kwargs):
+            callbacks.update(kwargs)
+
+        with patch("server.ClaudeWrapper") as mock_cls:
+            mock_cls.get_instance.return_value = wrapper
+            wrapper.register_callbacks = capture_callbacks
+            server.init_claude_wrapper()
+
+        # Call the on_user_message callback
+        callbacks["on_user_message"]("hello from terminal")
+
+        # Verify history entry was created
+        assert len(server.request_history) == 1
+        entry = server.request_history[0]
+        assert entry["input_type"] == "terminal"
+        assert entry["transcript"] == "hello from terminal"
+        assert entry["status"] == "processing"
+        assert entry["claude_launched"] is True
+
+        # Verify steps
+        assert len(entry["steps"]) == 2
+        assert entry["steps"][0]["name"] == "received"
+        assert entry["steps"][0]["label"] == "Terminal"
+        assert entry["steps"][1]["name"] == "claude"
+        assert entry["steps"][1]["status"] == "in_progress"
+
+        # Verify terminal_request_id was set
+        assert server.terminal_request_id is not None
+        assert server.terminal_request_id == entry["request_id"]
+
+    @patch("server.broadcast_message")
+    def test_on_turn_complete_finalizes_terminal_entry(self, mock_broadcast):
+        """on_turn_complete should finalize terminal timeline entry"""
+        callbacks = {}
+
+        def capture_callbacks(**kwargs):
+            callbacks.update(kwargs)
+
+        with patch("server.ClaudeWrapper") as mock_cls:
+            wrapper = MagicMock()
+            mock_cls.get_instance.return_value = wrapper
+            wrapper.register_callbacks = capture_callbacks
+            server.init_claude_wrapper()
+
+        # Set up a terminal entry
+        callbacks["on_user_message"]("test prompt")
+
+        # Now complete the turn
+        callbacks["on_turn_complete"]("Here is the response", False)
+
+        # Verify entry was finalized
+        entry = server.request_history[0]
+        assert entry["status"] == "completed"
+
+        # Claude step should be completed
+        claude_step = next(s for s in entry["steps"] if s["name"] == "claude")
+        assert claude_step["status"] == "completed"
+
+        # Response broadcast step should exist
+        broadcast_step = next(s for s in entry["steps"] if s["name"] == "response_broadcast")
+        assert broadcast_step["status"] == "completed"
+
+        # terminal_request_id should be cleared
+        assert server.terminal_request_id is None
+
+    @patch("server.broadcast_message")
+    def test_on_tool_adds_step_to_history(self, mock_broadcast):
+        """on_tool should add a tool step when current_request_id is set"""
+        callbacks = {}
+
+        def capture_callbacks(**kwargs):
+            callbacks.update(kwargs)
+
+        with patch("server.ClaudeWrapper") as mock_cls:
+            wrapper = MagicMock()
+            mock_cls.get_instance.return_value = wrapper
+            wrapper.register_callbacks = capture_callbacks
+            server.init_claude_wrapper()
+
+        # Set up a terminal entry (sets current_request_id via set_claude_state)
+        callbacks["on_user_message"]("test prompt")
+
+        # Call on_tool
+        callbacks["on_tool"]("Read", {"file_path": "/tmp/test.py"})
+
+        # Verify tool step was added
+        entry = server.request_history[0]
+        tool_steps = [s for s in entry["steps"] if s["name"] == "tool"]
+        assert len(tool_steps) == 1
+        assert tool_steps[0]["label"] == "Tool: Read"
+        assert tool_steps[0]["details"] == "/tmp/test.py"
+        assert tool_steps[0]["tool_name"] == "Read"
+
+
 class TestCheckHooksConfigured:
     """Tests for check_hooks_configured function"""
 

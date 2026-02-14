@@ -537,7 +537,7 @@ class ClaudeTmuxSession:
             if not completed:
                 logger.error("[TMUX] Timeout waiting for turn completion")
 
-            result = "".join(self._pending_text)
+            result = "".join(self._pending_text).strip()
 
             if on_result:
                 on_result(result)

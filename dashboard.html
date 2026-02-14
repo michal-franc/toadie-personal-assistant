@@ -116,6 +116,9 @@
     .input-type-badge.text {
       color: #a78bfa;
     }
+    .input-type-badge.terminal {
+      color: #34d399;
+    }
     .history-time {
       font-size: 0.8rem;
       color: #666;
@@ -264,6 +267,19 @@
     }
     .workflow-step.permission:not(:last-child)::after {
       background: #f59e0b;
+    }
+
+    /* Tool step styling */
+    .workflow-step.tool .step-icon {
+      background: #1e3a5f;
+      color: #60a5fa;
+    }
+    .workflow-step.tool .step-label {
+      color: #60a5fa;
+      font-size: 0.6rem;
+    }
+    .workflow-step.tool:not(:last-child)::after {
+      background: #60a5fa;
     }
 
     /* Transcript preview */
@@ -702,7 +718,7 @@
         <div class="history-header">
           <span class="history-id">#{{ item.id }}</span>
           <span class="input-type-badge" :class="item.input_type || 'voice'">
-            {{ (item.input_type || 'voice') === 'voice' ? '🎤' : '💬' }}
+            {{ item.input_type === 'terminal' ? '💻' : (item.input_type || 'voice') === 'voice' ? '🎤' : '💬' }}
           </span>
           <div>
             <span class="history-time">{{ formatTime(item.timestamp) }}</span>
@@ -716,11 +732,12 @@
             v-for="(step, index) in item.steps"
             :key="index"
             class="workflow-step"
-            :class="[step.status, { permission: step.name === 'permission' && step.status === 'in_progress' }]"
+            :class="[step.status, { permission: step.name === 'permission' && step.status === 'in_progress', tool: step.name === 'tool' }]"
             @click="openModal(item, step)"
           >
             <div class="step-icon">
               <span v-if="step.name === 'permission' && step.status === 'in_progress'">&#x1F6E1;</span>
+              <span v-else-if="step.name === 'tool'">&#128295;</span>
               <span v-else-if="step.status === 'completed'">&#10003;</span>
               <span v-else-if="step.status === 'error'">&#10005;</span>
               <span v-else-if="step.status === 'skipped'">&#8211;</span>
@@ -958,6 +975,22 @@
           </div>
           <div v-if="modal.step.status === 'in_progress'" style="font-size: 0.8rem; color: #f59e0b; margin-top: 12px;">
             Waiting for user response...
+          </div>
+        </template>
+
+        <!-- Tool step -->
+        <template v-if="modal.step?.name === 'tool'">
+          <div class="modal-row">
+            <span class="modal-label">Timestamp</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row">
+            <span class="modal-label">Tool</span>
+            <span class="modal-value mono">{{ modal.step.tool_name }}</span>
+          </div>
+          <div class="modal-row" v-if="modal.step.details">
+            <span class="modal-label">Details</span>
+            <span class="modal-value mono">{{ modal.step.details }}</span>
           </div>
         </template>
 

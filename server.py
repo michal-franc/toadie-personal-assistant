@@ -97,6 +97,9 @@ websocket_clients = {}
 # Active Claude wrapper (for cancellation)
 active_claude_wrapper: ClaudeWrapper = None
 
+# Terminal request tracking (for tmux-typed prompts)
+terminal_request_id: str | None = None
+
 # Current pending prompt (permission request from Claude)
 current_prompt = None  # {question, options: [{num, label, description, selected}], timestamp}
 
@@ -275,6 +278,30 @@ def update_permission_step(claude_request_id: str, permission_request_id: str, u
             break
 
 
+def _summarize_tool_input(name, input_data):
+    """Return a short summary string for a tool invocation."""
+    if not isinstance(input_data, dict):
+        return ""
+    if name == "Bash":
+        cmd = input_data.get("command", "")
+        return cmd[:80] + ("..." if len(cmd) > 80 else "")
+    if name in ("Read", "Write"):
+        return input_data.get("file_path", "")
+    if name == "Edit":
+        return input_data.get("file_path", "")
+    if name in ("Glob", "Grep"):
+        return input_data.get("pattern", "")
+    if name == "Task":
+        return input_data.get("description", "")
+    if name == "WebFetch":
+        return input_data.get("url", "")
+    # Fallback: first string value up to 80 chars
+    for v in input_data.values():
+        if isinstance(v, str) and v:
+            return v[:80] + ("..." if len(v) > 80 else "")
+    return ""
+
+
 def init_claude_wrapper():
     """Initialize the Claude wrapper with global callbacks and start the background watcher.
 
@@ -292,10 +319,63 @@ def init_claude_wrapper():
         req_id = claude_state.get("current_request_id")
         broadcast_message({"type": "tool", "request_id": req_id, "tool": name})
 
+        # Add tool step to timeline for tracing
+        if req_id:
+            summary = _summarize_tool_input(name, input_data)
+            add_response_step(
+                req_id,
+                {
+                    "name": "tool",
+                    "label": f"Tool: {name}",
+                    "status": "completed",
+                    "timestamp": datetime.now().isoformat(),
+                    "details": summary,
+                    "tool_name": name,
+                },
+            )
+
     def on_user_message(text):
         """Handle user messages from tmux-typed prompts (not server-initiated)."""
+        global terminal_request_id
         add_chat_message("user", text)
-        set_claude_state("thinking")
+
+        # Create a timeline entry so terminal requests appear in the dashboard
+        request_id = str(uuid.uuid4())[:8]
+        terminal_request_id = request_id
+        received_at = datetime.now()
+        entry = {
+            "id": len(request_history) + 1,
+            "request_id": request_id,
+            "timestamp": received_at.isoformat(),
+            "input_type": "terminal",
+            "content_type": "text/plain",
+            "size_bytes": len(text.encode()),
+            "transcript": text,
+            "claude_launched": True,
+            "status": "processing",
+            "error": None,
+            "steps": [
+                {
+                    "name": "received",
+                    "label": "Terminal",
+                    "status": "completed",
+                    "timestamp": received_at.isoformat(),
+                    "details": f"Terminal input: {len(text)} chars",
+                },
+                {
+                    "name": "claude",
+                    "label": "Claude",
+                    "status": "in_progress",
+                    "timestamp": datetime.now().isoformat(),
+                    "details": "Processing...",
+                },
+            ],
+        }
+        request_history.insert(0, entry)
+        if len(request_history) > MAX_HISTORY:
+            request_history.pop()
+
+        set_claude_state("thinking", request_id)
 
     def on_usage(usage):
         broadcast_message(
@@ -314,8 +394,42 @@ def init_claude_wrapper():
 
     def on_turn_complete(result, server_initiated):
         """For tmux-typed prompts, add response to chat and return to idle."""
-        if not server_initiated and result:
-            add_chat_message("claude", result)
+        global terminal_request_id
+        if not server_initiated:
+            if result:
+                add_chat_message("claude", result)
+
+            # Finalize the terminal timeline entry
+            req_id = terminal_request_id
+            if req_id:
+                update_response_step(
+                    req_id,
+                    "claude",
+                    {
+                        "status": "completed",
+                        "details": f"Finished ({len(result)} chars)" if result else "No response",
+                    },
+                )
+                client_count = len(websocket_clients)
+                add_response_step(
+                    req_id,
+                    {
+                        "name": "response_broadcast",
+                        "label": "Response Sent",
+                        "status": "completed",
+                        "timestamp": datetime.now().isoformat(),
+                        "details": (
+                            f"Broadcast to {client_count} client{'s' if client_count != 1 else ''} via WebSocket"
+                        ),
+                    },
+                )
+                # Mark the history entry as completed or error
+                for entry in request_history:
+                    if entry.get("request_id") == req_id:
+                        entry["status"] = "completed" if result else "error"
+                        break
+                terminal_request_id = None
+
             set_claude_state("idle")
 
     wrapper.register_callbacks(
