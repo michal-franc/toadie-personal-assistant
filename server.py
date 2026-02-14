@@ -190,7 +190,7 @@ def text_to_speech(text: str, request_id: str) -> str:
         import urllib.error
         import urllib.request
 
-        url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
+        url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en&mip_opt_out=true"
         headers = {
             "Authorization": f"Token {os.environ['DEEPGRAM_API_KEY']}",
             "Content-Type": "application/json",
@@ -229,6 +229,7 @@ def transcribe_audio(audio_data: bytes) -> str:
         language=transcription_config["language"],
         smart_format=transcription_config["smart_format"],
         punctuate=transcription_config["punctuate"],
+        extra={"mip_opt_out": "true"},
     )
 
     transcript = ""
