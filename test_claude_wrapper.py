@@ -458,6 +458,44 @@ class TestJsonlWatcher:
 
         user_cb.assert_not_called()
 
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_fires_on_turn_done(self, mock_read):
+        mock_read.return_value = [
+            {"type": "system", "subtype": "turn_duration", "durationMs": 1234},
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        turn_done_cb = MagicMock()
+        result = watcher.poll(on_turn_done=turn_done_cb)
+
+        turn_done_cb.assert_called_once()
+        # turn_duration itself is not "activity" (no text/tool), so had_activity is False
+        assert result is False
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_skips_non_turn_duration_system(self, mock_read):
+        mock_read.return_value = [
+            {"type": "system", "subtype": "other_system_event"},
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        turn_done_cb = MagicMock()
+        watcher.poll(on_turn_done=turn_done_cb)
+
+        turn_done_cb.assert_not_called()
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_turn_done_not_fired_for_sidechain(self, mock_read):
+        mock_read.return_value = [
+            {"type": "system", "subtype": "turn_duration", "isSidechain": True},
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        turn_done_cb = MagicMock()
+        watcher.poll(on_turn_done=turn_done_cb)
+
+        turn_done_cb.assert_not_called()
+
 
 class TestClaudeTmuxSessionRegisterCallbacks:
     """Tests for register_callbacks"""

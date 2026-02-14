@@ -66,6 +66,7 @@ class JsonlWatcher:
         on_text: Optional[Callable[[str], None]] = None,
         on_tool: Optional[Callable[[str, dict], None]] = None,
         on_user_message: Optional[Callable[[str], None]] = None,
+        on_turn_done: Optional[Callable[[], None]] = None,
     ) -> bool:
         """Poll for new entries and fire callbacks.
 
@@ -87,6 +88,12 @@ class JsonlWatcher:
 
             # Skip sidechain (subagent) entries
             if entry.get("isSidechain"):
+                continue
+
+            # Detect turn completion: system entry with subtype "turn_duration"
+            if entry_type == "system" and entry.get("subtype") == "turn_duration":
+                if on_turn_done:
+                    on_turn_done()
                 continue
 
             if entry_type == "assistant":
@@ -225,11 +232,13 @@ class ClaudeTmuxSession:
         """Main loop for the background watcher thread.
 
         Continuously polls the JSONL file for new entries and dispatches
-        to registered callbacks. Detects turn completion via idle timeout.
+        to registered callbacks. Detects turn completion via turn_duration
+        signal (primary) or idle timeout (fallback).
         """
         watcher: Optional[JsonlWatcher] = None
         last_session_refresh = 0.0
         last_activity = 0.0
+        turn_done_signal = False
         accumulated_text: list[str] = []
 
         while self._watcher_running:
@@ -257,6 +266,7 @@ class ClaudeTmuxSession:
                 watcher = JsonlWatcher(self.workdir, self.session_id, start_line)
                 accumulated_text.clear()
                 last_activity = 0.0
+                turn_done_signal = False
 
             # Build callbacks that fire both global and accumulate for turn detection
             def on_text(text):
@@ -281,32 +291,49 @@ class ClaudeTmuxSession:
                         cb(text)
                 logger.info(f"[WATCHER] User message: {text[:50]}...")
 
-            had_activity = watcher.poll(on_text=on_text, on_tool=on_tool, on_user_message=on_user_message)
+            def on_turn_done():
+                nonlocal turn_done_signal
+                turn_done_signal = True
+
+            had_activity = watcher.poll(
+                on_text=on_text,
+                on_tool=on_tool,
+                on_user_message=on_user_message,
+                on_turn_done=on_turn_done,
+            )
 
             if had_activity:
                 last_activity = time.time()
 
-            # Check idle timeout for turn completion
-            if last_activity > 0 and accumulated_text:
+            # Finalize turn: turn_duration signal (primary) or idle timeout (fallback)
+            finalize = False
+            if turn_done_signal and accumulated_text:
+                logger.info("[WATCHER] Turn complete (turn_duration signal)")
+                finalize = True
+            elif last_activity > 0 and accumulated_text:
                 idle_elapsed = time.time() - last_activity
                 if idle_elapsed >= IDLE_TIMEOUT:
-                    result = "".join(accumulated_text)
-                    logger.info(f"[WATCHER] Turn complete (idle {idle_elapsed:.1f}s)")
+                    logger.info(f"[WATCHER] Turn complete (idle timeout {idle_elapsed:.1f}s)")
+                    finalize = True
 
-                    # Fire usage callback
-                    self._update_usage(self._callbacks.get("on_usage"))
+            if finalize:
+                result = "".join(accumulated_text)
 
-                    # Fire turn_complete callback
-                    cb = self._callbacks.get("on_turn_complete")
-                    if cb:
-                        cb(result, self._server_prompt_active)
+                # Fire usage callback
+                self._update_usage(self._callbacks.get("on_usage"))
 
-                    # Signal run() if it's waiting
-                    self._turn_complete.set()
+                # Fire turn_complete callback
+                cb = self._callbacks.get("on_turn_complete")
+                if cb:
+                    cb(result, self._server_prompt_active)
 
-                    # Reset for next turn
-                    accumulated_text.clear()
-                    last_activity = 0.0
+                # Signal run() if it's waiting
+                self._turn_complete.set()
+
+                # Reset for next turn
+                accumulated_text.clear()
+                last_activity = 0.0
+                turn_done_signal = False
 
             time.sleep(POLL_INTERVAL)
 
