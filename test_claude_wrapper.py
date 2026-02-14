@@ -1,11 +1,12 @@
 """Unit tests for claude_wrapper.py (ClaudeTmuxSession + JsonlWatcher)"""
 
 import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_wrapper import ClaudeTmuxSession, ClaudeWrapper, JsonlWatcher
+from claude_wrapper import STARTUP_WAIT, ClaudeTmuxSession, ClaudeWrapper, JsonlWatcher
 
 
 class TestBackwardCompatAlias:
@@ -586,3 +587,121 @@ class TestClaudeTmuxSessionInitState:
             session.shutdown()
 
         assert session._watcher_running is False
+
+
+class TestPollLoops:
+    """Tests for poll-until-condition loops that replaced blind sleeps."""
+
+    def teardown_method(self):
+        ClaudeTmuxSession._instance = None
+
+    @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.find_latest_session", return_value="sess-1")
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
+    @patch.object(ClaudeTmuxSession, "_start_session")
+    def test_startup_wait_returns_early_when_jsonl_ready(self, mock_start, mock_alive, mock_latest, mock_send):
+        """When JSONL becomes non-empty quickly, don't wait the full STARTUP_WAIT."""
+        call_count = 0
+
+        def mock_line_count(workdir, session_id):
+            nonlocal call_count
+            call_count += 1
+            # First call returns 0 (triggers the wait loop), second returns 1 (ready)
+            return 0 if call_count <= 1 else 1
+
+        session = ClaudeTmuxSession("/tmp")
+        session.session_id = "sess-1"
+        session._turn_complete = MagicMock()
+        session._turn_complete.wait = MagicMock(return_value=True)
+        session._turn_complete.clear = MagicMock()
+        session._turn_complete.is_set = MagicMock(return_value=False)
+
+        with patch("claude_wrapper.get_jsonl_line_count", side_effect=mock_line_count):
+            t0 = time.monotonic()
+            session.run("test")
+            elapsed = time.monotonic() - t0
+
+        # Should finish well under STARTUP_WAIT (3s)
+        assert elapsed < STARTUP_WAIT / 2
+
+    @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.find_latest_session", return_value="sess-1")
+    @patch("claude_wrapper.get_jsonl_line_count", return_value=0)
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
+    @patch.object(ClaudeTmuxSession, "_start_session")
+    def test_startup_wait_uses_full_deadline(self, mock_start, mock_alive, mock_count, mock_latest, mock_send):
+        """When JSONL never gets entries, wait the full STARTUP_WAIT deadline."""
+        session = ClaudeTmuxSession("/tmp")
+        session.session_id = "sess-1"
+        session._turn_complete = MagicMock()
+        session._turn_complete.wait = MagicMock(return_value=True)
+        session._turn_complete.clear = MagicMock()
+        session._turn_complete.is_set = MagicMock(return_value=False)
+
+        t0 = time.monotonic()
+        session.run("test")
+        elapsed = time.monotonic() - t0
+
+        # Should wait at least close to STARTUP_WAIT (3s) + 1s post-prompt
+        assert elapsed >= STARTUP_WAIT * 0.9
+
+    @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.get_jsonl_line_count", return_value=5)
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
+    @patch.object(ClaudeTmuxSession, "_start_session")
+    def test_post_prompt_returns_early_on_session_change(self, mock_start, mock_alive, mock_count, mock_send):
+        """When session ID changes after prompt, detect it quickly."""
+        call_count = 0
+
+        def mock_latest(workdir):
+            nonlocal call_count
+            call_count += 1
+            # First call in run() returns sess-1, post-prompt calls return sess-2
+            return "sess-1" if call_count <= 1 else "sess-2"
+
+        session = ClaudeTmuxSession("/tmp")
+        session.session_id = "sess-1"
+        session._turn_complete = MagicMock()
+        session._turn_complete.wait = MagicMock(return_value=True)
+        session._turn_complete.clear = MagicMock()
+        session._turn_complete.is_set = MagicMock(return_value=False)
+
+        with patch("claude_wrapper.find_latest_session", side_effect=mock_latest):
+            t0 = time.monotonic()
+            session.run("test")
+            elapsed = time.monotonic() - t0
+
+        # Should return well under the 1s post-prompt deadline
+        assert elapsed < 0.5
+        assert session.session_id == "sess-2"
+
+    @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
+    @patch("claude_wrapper.find_latest_session", return_value="sess-1")
+    @patch.object(ClaudeTmuxSession, "is_alive", return_value=True)
+    @patch.object(ClaudeTmuxSession, "_start_session")
+    def test_post_prompt_returns_early_on_new_entries(self, mock_start, mock_alive, mock_latest, mock_send):
+        """When new JSONL entries appear after prompt, break early."""
+        call_count = 0
+
+        def mock_line_count(workdir, session_id):
+            nonlocal call_count
+            call_count += 1
+            # First call: start_line check (5, non-zero so no startup wait)
+            # Second call: pre_prompt_line_count snapshot (5)
+            # Third call: poll check — new entries (6)
+            return 5 if call_count <= 2 else 6
+
+        session = ClaudeTmuxSession("/tmp")
+        session.session_id = "sess-1"
+        session._turn_complete = MagicMock()
+        session._turn_complete.wait = MagicMock(return_value=True)
+        session._turn_complete.clear = MagicMock()
+        session._turn_complete.is_set = MagicMock(return_value=False)
+
+        with patch("claude_wrapper.get_jsonl_line_count", side_effect=mock_line_count):
+            t0 = time.monotonic()
+            session.run("test")
+            elapsed = time.monotonic() - t0
+
+        # Should return well under the 1s post-prompt deadline
+        assert elapsed < 0.5
