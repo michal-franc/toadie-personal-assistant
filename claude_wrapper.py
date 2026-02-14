@@ -158,6 +158,9 @@ class ClaudeTmuxSession:
         self._pending_text: list[str] = []
         self._turn_complete = threading.Event()
 
+        # Signal watcher to immediately refresh session ID (set by run())
+        self._session_refresh_needed = threading.Event()
+
         # Flag: True when run() is active (server-initiated prompt)
         # Used to suppress on_user_message for server prompts (already added by caller)
         self._server_prompt_active = False
@@ -230,9 +233,12 @@ class ClaudeTmuxSession:
         accumulated_text: list[str] = []
 
         while self._watcher_running:
-            # Periodically refresh session ID
+            # Refresh session ID periodically or when signaled by run()
             now = time.time()
-            if now - last_session_refresh > SESSION_REFRESH_INTERVAL:
+            force_refresh = self._session_refresh_needed.is_set()
+            if force_refresh:
+                self._session_refresh_needed.clear()
+            if force_refresh or now - last_session_refresh > SESSION_REFRESH_INTERVAL:
                 latest = find_latest_session(self.workdir)
                 if latest and latest != self.session_id:
                     logger.info(f"[WATCHER] Session ID updated: {self.session_id} -> {latest}")
@@ -475,6 +481,8 @@ class ClaudeTmuxSession:
             if refreshed and refreshed != self.session_id:
                 logger.info(f"[TMUX] Session ID changed after prompt: {self.session_id} -> {refreshed}")
                 self.session_id = refreshed
+                # Signal background watcher to pick up the new session immediately
+                self._session_refresh_needed.set()
 
             # Wait for the background watcher to signal turn completion
             completed = self._turn_complete.wait(timeout=TURN_TIMEOUT)
