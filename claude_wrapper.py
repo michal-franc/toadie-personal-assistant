@@ -26,6 +26,7 @@ from transcript_reader import (
     get_projects_dir,
     read_context_usage,
     read_new_entries,
+    session_file_exists,
 )
 
 # Tmux session name for Claude's interactive TUI
@@ -264,11 +265,17 @@ class ClaudeTmuxSession:
             if force_refresh:
                 self._session_refresh_needed.clear()
             if force_refresh or now - last_session_refresh > SESSION_REFRESH_INTERVAL:
-                latest = find_latest_session(self.workdir)
+                if force_refresh:
+                    # run() detected a session change — trust it
+                    latest = find_latest_session(self.workdir)
+                elif not session_file_exists(self.workdir, self.session_id):
+                    # Current file disappeared — fall back
+                    latest = find_latest_session(self.workdir)
+                else:
+                    latest = self.session_id  # Keep current (pinned)
                 if latest and latest != self.session_id:
                     logger.info(f"[WATCHER] Session ID updated: {self.session_id} -> {latest}")
                     self.session_id = latest
-                    # Reset watcher for new session
                     watcher = None
                 last_session_refresh = now
 
@@ -285,9 +292,14 @@ class ClaudeTmuxSession:
                 if self._watcher_start_line is not None and old_sid == self.session_id:
                     start_line = self._watcher_start_line
                 else:
-                    start_line = 0 if old_sid != self.session_id else get_jsonl_line_count(self.workdir, self.session_id)
+                    if old_sid != self.session_id:
+                        start_line = 0
+                    else:
+                        start_line = get_jsonl_line_count(self.workdir, self.session_id)
                 self._watcher_start_line = None
-                logger.info(f"[WATCHER] Creating new JsonlWatcher: {old_sid} -> {self.session_id} (from line {start_line})")
+                logger.info(
+                    f"[WATCHER] Creating new JsonlWatcher: {old_sid} -> {self.session_id} (from line {start_line})"
+                )
                 watcher = JsonlWatcher(self.workdir, self.session_id, start_line)
                 accumulated_text.clear()
                 last_activity = 0.0
@@ -485,12 +497,12 @@ class ClaudeTmuxSession:
                 self._server_prompt_active = False
                 raise RuntimeError("Failed to start Claude tmux session")
 
-            # Always refresh session ID to the latest JSONL file.
-            latest = find_latest_session(self.workdir)
-            if latest:
-                if latest != self.session_id:
-                    logger.info(f"[TMUX] Session ID updated: {self.session_id} -> {latest}")
-                self.session_id = latest
+            # Only refresh if current session file is missing (pinned session)
+            if not self.session_id or not session_file_exists(self.workdir, self.session_id):
+                latest = find_latest_session(self.workdir)
+                if latest:
+                    logger.info(f"[TMUX] Session file missing, falling back: {self.session_id} -> {latest}")
+                    self.session_id = latest
 
             if not self.session_id:
                 self._server_prompt_active = False
