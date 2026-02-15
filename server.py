@@ -311,28 +311,31 @@ def init_claude_wrapper():
     model = transcription_config.get("claude_model")
     wrapper = ClaudeWrapper.get_instance(claude_workdir, model=model)
 
-    def on_text(text_chunk):
+    def on_text(text_chunk, claude_timestamp=None):
         req_id = claude_state.get("current_request_id")
-        broadcast_message({"type": "text_chunk", "request_id": req_id, "text": text_chunk})
+        msg = {"type": "text_chunk", "request_id": req_id, "text": text_chunk}
+        if claude_timestamp:
+            msg["claude_timestamp"] = claude_timestamp
+        broadcast_message(msg)
 
-    def on_tool(name, input_data):
+    def on_tool(name, input_data, claude_timestamp=None):
         req_id = claude_state.get("current_request_id")
         broadcast_message({"type": "tool", "request_id": req_id, "tool": name})
 
         # Add tool step to timeline for tracing
         if req_id:
             summary = _summarize_tool_input(name, input_data)
-            add_response_step(
-                req_id,
-                {
-                    "name": "tool",
-                    "label": f"Tool: {name}",
-                    "status": "completed",
-                    "timestamp": datetime.now().isoformat(),
-                    "details": summary,
-                    "tool_name": name,
-                },
-            )
+            step = {
+                "name": "tool",
+                "label": f"Tool: {name}",
+                "status": "completed",
+                "timestamp": datetime.now().isoformat(),
+                "details": summary,
+                "tool_name": name,
+            }
+            if claude_timestamp:
+                step["claude_timestamp"] = claude_timestamp
+            add_response_step(req_id, step)
 
     def on_user_message(text):
         """Handle user messages from tmux-typed prompts (not server-initiated)."""

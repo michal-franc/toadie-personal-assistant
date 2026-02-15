@@ -64,8 +64,8 @@ class JsonlWatcher:
 
     def poll(
         self,
-        on_text: Optional[Callable[[str], None]] = None,
-        on_tool: Optional[Callable[[str, dict], None]] = None,
+        on_text: Optional[Callable[[str, "str | None"], None]] = None,
+        on_tool: Optional[Callable[[str, dict, "str | None"], None]] = None,
         on_user_message: Optional[Callable[[str], None]] = None,
         on_turn_done: Optional[Callable[[], None]] = None,
     ) -> bool:
@@ -98,6 +98,7 @@ class JsonlWatcher:
                 continue
 
             if entry_type == "assistant":
+                timestamp = entry.get("timestamp")
                 content = entry.get("message", {}).get("content", [])
                 for item in content:
                     item_type = item.get("type")
@@ -105,14 +106,14 @@ class JsonlWatcher:
                     if item_type == "text":
                         text = item.get("text", "")
                         if text and on_text:
-                            on_text(text)
+                            on_text(text, timestamp)
                             had_activity = True
 
                     elif item_type == "tool_use":
                         tool_name = item.get("name", "unknown")
                         tool_input = item.get("input", {})
                         if on_tool:
-                            on_tool(tool_name, tool_input)
+                            on_tool(tool_name, tool_input, timestamp)
                         had_activity = True
 
             elif entry_type == "user":
@@ -196,8 +197,8 @@ class ClaudeTmuxSession:
 
     def register_callbacks(
         self,
-        on_text: Optional[Callable[[str], None]] = None,
-        on_tool: Optional[Callable[[str, dict], None]] = None,
+        on_text: Optional[Callable[[str, "str | None"], None]] = None,
+        on_tool: Optional[Callable[[str, dict, "str | None"], None]] = None,
         on_user_message: Optional[Callable[[str], None]] = None,
         on_usage: Optional[Callable[[dict], None]] = None,
         on_turn_complete: Optional[Callable[[str, bool], None]] = None,
@@ -208,8 +209,8 @@ class ClaudeTmuxSession:
         regardless of whether the prompt came from the server or was typed directly.
 
         Args:
-            on_text: Called with text content from assistant messages
-            on_tool: Called with (tool_name, tool_input) for tool invocations
+            on_text: Called with (text, claude_timestamp) from assistant messages
+            on_tool: Called with (tool_name, tool_input, claude_timestamp) for tool invocations
             on_user_message: Called with prompt text when a non-server user message is seen
             on_usage: Called with usage dict when a turn ends
             on_turn_complete: Called with (result_text, server_initiated) when a turn ends
@@ -306,19 +307,19 @@ class ClaudeTmuxSession:
                 turn_done_signal = False
 
             # Build callbacks that fire both global and accumulate for turn detection
-            def on_text(text):
+            def on_text(text, claude_timestamp=None):
                 accumulated_text.append(text)
                 self._pending_text.append(text)
 
                 cb = self._callbacks.get("on_text")
                 if cb:
-                    cb(text)
+                    cb(text, claude_timestamp)
                 logger.debug(f"[WATCHER] Text: {text[:100]}...")
 
-            def on_tool(name, tool_input):
+            def on_tool(name, tool_input, claude_timestamp=None):
                 cb = self._callbacks.get("on_tool")
                 if cb:
-                    cb(name, tool_input)
+                    cb(name, tool_input, claude_timestamp)
                 logger.debug(f"[WATCHER] Tool: {name}")
 
             def on_user_message(text):
@@ -524,15 +525,15 @@ class ClaudeTmuxSession:
             orig_on_tool = self._callbacks.get("on_tool")
             orig_on_usage = self._callbacks.get("on_usage")
 
-            def combined_on_text(text):
+            def combined_on_text(text, claude_timestamp=None):
                 if orig_on_text:
-                    orig_on_text(text)
+                    orig_on_text(text, claude_timestamp)
                 if on_text:
                     on_text(text)
 
-            def combined_on_tool(name, tool_input):
+            def combined_on_tool(name, tool_input, claude_timestamp=None):
                 if orig_on_tool:
-                    orig_on_tool(name, tool_input)
+                    orig_on_tool(name, tool_input, claude_timestamp)
                 if on_tool:
                     on_tool(name, tool_input)
 

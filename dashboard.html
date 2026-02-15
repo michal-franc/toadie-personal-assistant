@@ -981,8 +981,18 @@
         <!-- Tool step -->
         <template v-if="modal.step?.name === 'tool'">
           <div class="modal-row">
-            <span class="modal-label">Timestamp</span>
+            <span class="modal-label">Broadcast</span>
             <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
+          </div>
+          <div class="modal-row" v-if="modal.step.claude_timestamp">
+            <span class="modal-label">Claude</span>
+            <span class="modal-value">{{ formatFullTime(modal.step.claude_timestamp) }}</span>
+          </div>
+          <div class="modal-row" v-if="modal.step.claude_timestamp">
+            <span class="modal-label">Latency</span>
+            <span class="modal-value">{{ formatDuration(
+              new Date(modal.step.timestamp) - new Date(modal.step.claude_timestamp)
+            ) }}</span>
           </div>
           <div class="modal-row">
             <span class="modal-label">Tool</span>
