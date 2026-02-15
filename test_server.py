@@ -1016,8 +1016,8 @@ class TestTerminalRequestTimeline:
         # Set up a terminal entry (sets current_request_id via set_claude_state)
         callbacks["on_user_message"]("test prompt")
 
-        # Call on_tool
-        callbacks["on_tool"]("Read", {"file_path": "/tmp/test.py"})
+        # Call on_tool (with claude_timestamp)
+        callbacks["on_tool"]("Read", {"file_path": "/tmp/test.py"}, "2026-02-15T10:00:00Z")
 
         # Verify tool step was added
         entry = server.request_history[0]
@@ -1026,6 +1026,7 @@ class TestTerminalRequestTimeline:
         assert tool_steps[0]["label"] == "Tool: Read"
         assert tool_steps[0]["details"] == "/tmp/test.py"
         assert tool_steps[0]["tool_name"] == "Read"
+        assert tool_steps[0]["claude_timestamp"] == "2026-02-15T10:00:00Z"
 
 
 class TestCheckHooksConfigured:

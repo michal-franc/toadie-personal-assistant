@@ -336,6 +336,7 @@ class TestJsonlWatcher:
         mock_read.return_value = [
             {
                 "type": "assistant",
+                "timestamp": "2026-02-15T10:00:00Z",
                 "message": {"content": [{"type": "text", "text": "Hello world"}]},
             }
         ]
@@ -345,7 +346,7 @@ class TestJsonlWatcher:
         result = watcher.poll(on_text=text_cb)
 
         assert result is True
-        text_cb.assert_called_once_with("Hello world")
+        text_cb.assert_called_once_with("Hello world", "2026-02-15T10:00:00Z")
         assert watcher.current_line == 1
 
     @patch("claude_wrapper.read_new_entries")
@@ -353,6 +354,7 @@ class TestJsonlWatcher:
         mock_read.return_value = [
             {
                 "type": "assistant",
+                "timestamp": "2026-02-15T10:00:00Z",
                 "message": {
                     "content": [
                         {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
@@ -366,7 +368,22 @@ class TestJsonlWatcher:
         result = watcher.poll(on_tool=tool_cb)
 
         assert result is True
-        tool_cb.assert_called_once_with("Bash", {"command": "ls"})
+        tool_cb.assert_called_once_with("Bash", {"command": "ls"}, "2026-02-15T10:00:00Z")
+
+    @patch("claude_wrapper.read_new_entries")
+    def test_poll_passes_none_timestamp_when_missing(self, mock_read):
+        mock_read.return_value = [
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "no ts"}]},
+            }
+        ]
+
+        watcher = JsonlWatcher("/tmp", "sess", 0)
+        text_cb = MagicMock()
+        watcher.poll(on_text=text_cb)
+
+        text_cb.assert_called_once_with("no ts", None)
 
     @patch("claude_wrapper.read_new_entries")
     def test_poll_skips_noise_types(self, mock_read):
