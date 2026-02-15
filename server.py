@@ -316,6 +316,13 @@ def init_claude_wrapper():
         msg = {"type": "text_chunk", "request_id": req_id, "text": text_chunk}
         if claude_timestamp:
             msg["claude_timestamp"] = claude_timestamp
+            # Store first claude timestamp on history entry for response latency tracking
+            if req_id:
+                for entry in request_history:
+                    if entry.get("request_id") == req_id:
+                        if "first_claude_timestamp" not in entry:
+                            entry["first_claude_timestamp"] = claude_timestamp
+                        break
         broadcast_message(msg)
 
     def on_tool(name, input_data, claude_timestamp=None):
@@ -513,6 +520,45 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                     {"status": "completed", "details": f"Claude finished ({len(result)} chars)"},
                 )
 
+            # Handle response based on mode
+            if response_mode == "disabled":
+                claude_responses[request_id] = {"status": "disabled", "timestamp": datetime.now().isoformat()}
+                set_claude_state("idle")
+                return
+
+            # Look up the first claude_timestamp stored by global on_text callback
+            first_claude_ts = None
+            if request_id:
+                for entry in request_history:
+                    if entry.get("request_id") == request_id:
+                        first_claude_ts = entry.get("first_claude_timestamp")
+                        break
+
+            # Add "Response Ready" step with Claude's JSONL timestamp
+            if first_claude_ts:
+                add_response_step(
+                    request_id,
+                    {
+                        "name": "response_ready_claude",
+                        "label": "Response Ready",
+                        "status": "completed",
+                        "timestamp": first_claude_ts,
+                        "details": f"Claude produced response ({len(result)} chars)",
+                    },
+                )
+
+            # Add "Response Captured" step with server timestamp
+            captured_step = {
+                "name": "response_captured",
+                "label": "Response Captured",
+                "status": "completed",
+                "timestamp": datetime.now().isoformat(),
+                "details": result[:200] + ("..." if len(result) > 200 else ""),
+            }
+            if first_claude_ts:
+                captured_step["claude_timestamp"] = first_claude_ts
+            add_response_step(request_id, captured_step)
+
             # Add Claude's response to chat (broadcasts via WebSocket)
             if result:
                 add_chat_message("claude", result)
@@ -532,24 +578,6 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                             ),
                         },
                     )
-
-            # Handle response based on mode
-            if response_mode == "disabled":
-                claude_responses[request_id] = {"status": "disabled", "timestamp": datetime.now().isoformat()}
-                set_claude_state("idle")
-                return
-
-            # Add response captured step
-            add_response_step(
-                request_id,
-                {
-                    "name": "response_captured",
-                    "label": "Response Captured",
-                    "status": "completed",
-                    "timestamp": datetime.now().isoformat(),
-                    "details": result[:200] + ("..." if len(result) > 200 else ""),
-                },
-            )
 
             # Generate TTS if audio mode
             audio_path = None
