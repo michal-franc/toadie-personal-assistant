@@ -682,27 +682,36 @@ class TestPollLoops:
     def test_post_prompt_returns_early_on_session_change(
         self, mock_start, mock_alive, mock_count, mock_exists, mock_send
     ):
-        """When session ID changes after prompt, detect it quickly."""
+        """When a new JSONL file appears after prompt, detect it quickly."""
+        import tempfile
+        from pathlib import Path
 
-        def mock_latest(workdir):
-            # Post-prompt calls detect new session
-            return "sess-2"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir)
+            # Pre-existing session file
+            (projects_dir / "sess-1.jsonl").write_text('{"type":"init"}')
 
-        session = ClaudeTmuxSession("/tmp")
-        session.session_id = "sess-1"
-        session._turn_complete = MagicMock()
-        session._turn_complete.wait = MagicMock(return_value=True)
-        session._turn_complete.clear = MagicMock()
-        session._turn_complete.is_set = MagicMock(return_value=False)
+            session = ClaudeTmuxSession("/tmp")
+            session.session_id = "sess-1"
+            session._turn_complete = MagicMock()
+            session._turn_complete.wait = MagicMock(return_value=True)
+            session._turn_complete.clear = MagicMock()
+            session._turn_complete.is_set = MagicMock(return_value=False)
 
-        with patch("claude_wrapper.find_latest_session", side_effect=mock_latest):
-            t0 = time.monotonic()
-            session.run("test")
-            elapsed = time.monotonic() - t0
+            # When prompt is "sent", simulate Claude creating a new session file
+            def send_and_create_file(prompt):
+                (projects_dir / "sess-2.jsonl").write_text('{"type":"init"}')
 
-        # Should return well under the 1s post-prompt deadline
-        assert elapsed < 0.5
-        assert session.session_id == "sess-2"
+            mock_send.side_effect = send_and_create_file
+
+            with patch("claude_wrapper.get_projects_dir", return_value=projects_dir):
+                t0 = time.monotonic()
+                session.run("test")
+                elapsed = time.monotonic() - t0
+
+            # Should return well under the 1s post-prompt deadline
+            assert elapsed < 0.5
+            assert session.session_id == "sess-2"
 
     @patch.object(ClaudeTmuxSession, "_send_prompt_via_tmux")
     @patch("claude_wrapper.session_file_exists", return_value=True)

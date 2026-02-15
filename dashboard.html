@@ -865,18 +865,29 @@
           </div>
         </template>
 
-        <!-- Response captured step -->
         <!-- Response ready (Claude JSONL timestamp) -->
         <template v-if="modal.step?.name === 'response_ready_claude'">
           <div class="modal-row">
             <span class="modal-label">Claude</span>
             <span class="modal-value">{{ formatFullTime(modal.step.timestamp) }}</span>
           </div>
+          <div class="modal-row" v-if="getNextStepTimestamp(modal.item, modal.step)">
+            <span class="modal-label">Captured</span>
+            <span class="modal-value">{{ formatFullTime(getNextStepTimestamp(modal.item, modal.step)) }}</span>
+          </div>
+          <div class="modal-row" v-if="getNextStepTimestamp(modal.item, modal.step)">
+            <span class="modal-label">Latency</span>
+            <span class="modal-value">{{ formatDuration(
+              new Date(getNextStepTimestamp(modal.item, modal.step)) - new Date(modal.step.timestamp)
+            ) }}</span>
+          </div>
           <div class="modal-row">
             <span class="modal-label">Details</span>
             <span class="modal-value">{{ modal.step.details }}</span>
           </div>
         </template>
+
+        <!-- Response captured step -->
 
         <template v-if="modal.step?.name === 'response_captured'">
           <div class="modal-row">
@@ -1304,6 +1315,13 @@
           modal.value = { visible: false, item: null, step: null }
         }
 
+        const getNextStepTimestamp = (item, step) => {
+          if (!item?.steps || !step) return null
+          const idx = item.steps.indexOf(step)
+          if (idx < 0 || idx >= item.steps.length - 1) return null
+          return item.steps[idx + 1]?.timestamp || null
+        }
+
         const openSettings = () => {
           settingsModal.value.form = { ...config.value }
           settingsModal.value.visible = true
@@ -1462,6 +1480,7 @@
           formatDuration,
           getTotalDuration,
           getStepDuration,
+          getNextStepTimestamp,
           openModal,
           closeModal,
           openSettings,

@@ -41,8 +41,9 @@ STARTUP_WAIT = 3.0
 # JSONL polling interval (seconds)
 POLL_INTERVAL = 0.3
 
-# Idle timeout: after this many seconds with no new JSONL activity, consider the turn done
-IDLE_TIMEOUT = 3.0
+# Idle timeout: adaptive — starts at BASE, doubles with each activity burst, caps at MAX
+IDLE_TIMEOUT_BASE = 0.5
+IDLE_TIMEOUT_MAX = 5.0
 
 # Maximum time to wait for a turn to complete (seconds)
 TURN_TIMEOUT = 300
@@ -267,8 +268,8 @@ class ClaudeTmuxSession:
                 self._session_refresh_needed.clear()
             if force_refresh or now - last_session_refresh > SESSION_REFRESH_INTERVAL:
                 if force_refresh:
-                    # run() detected a session change — trust it
-                    latest = find_latest_session(self.workdir)
+                    # run() already updated self.session_id — just use it
+                    latest = self.session_id
                 elif not session_file_exists(self.workdir, self.session_id):
                     # Current file disappeared — fall back
                     latest = find_latest_session(self.workdir)
@@ -305,6 +306,8 @@ class ClaudeTmuxSession:
                 accumulated_text.clear()
                 last_activity = 0.0
                 turn_done_signal = False
+                activity_bursts = 0
+                was_idle = True
 
             # Build callbacks that fire both global and accumulate for turn detection
             def on_text(text, claude_timestamp=None):
@@ -342,16 +345,31 @@ class ClaudeTmuxSession:
 
             if had_activity:
                 last_activity = time.time()
+                # Track idle→active transitions to scale the timeout
+                if was_idle:
+                    activity_bursts += 1
+                was_idle = False
+            elif last_activity > 0:
+                was_idle = True
 
-            # Finalize turn: turn_duration signal (primary) or idle timeout (fallback)
+            # Finalize turn: turn_duration signal (primary) or adaptive idle timeout (fallback)
             finalize = False
             if turn_done_signal and accumulated_text:
                 logger.info("[WATCHER] Turn complete (turn_duration signal)")
                 finalize = True
             elif last_activity > 0 and accumulated_text:
                 idle_elapsed = time.time() - last_activity
-                if idle_elapsed >= IDLE_TIMEOUT:
-                    logger.info(f"[WATCHER] Turn complete (idle timeout {idle_elapsed:.1f}s)")
+                # Adaptive timeout: starts at BASE, doubles per activity burst, caps at MAX
+                # Simple response (1 burst) → 0.5s, multi-tool (3 bursts) → 2.0s, etc.
+                idle_threshold = min(
+                    IDLE_TIMEOUT_BASE * (2 ** (activity_bursts - 1)),
+                    IDLE_TIMEOUT_MAX,
+                )
+                if idle_elapsed >= idle_threshold:
+                    logger.info(
+                        f"[WATCHER] Turn complete (idle timeout {idle_elapsed:.1f}s, "
+                        f"threshold {idle_threshold:.1f}s, bursts={activity_bursts})"
+                    )
                     finalize = True
 
             if finalize:
@@ -373,6 +391,8 @@ class ClaudeTmuxSession:
                 accumulated_text.clear()
                 last_activity = 0.0
                 turn_done_signal = False
+                activity_bursts = 0
+                was_idle = True
 
             time.sleep(POLL_INTERVAL)
 
@@ -548,17 +568,30 @@ class ClaudeTmuxSession:
             self._callbacks["on_tool"] = combined_on_tool
             self._callbacks["on_usage"] = combined_on_usage
 
+            # Snapshot existing JSONL files BEFORE sending prompt so we can
+            # detect truly new files (avoids switching to a manual session)
+            projects_dir = get_projects_dir(self.workdir)
+            existing_files = set()
+            if projects_dir.is_dir():
+                existing_files = {f.name for f in projects_dir.glob("*.jsonl")}
+
             # Send prompt
             self._send_prompt_via_tmux(prompt)
 
             # After sending, Claude may create a new JSONL file — poll for it
+            # Only look for NEW files not in the pre-prompt snapshot to avoid
+            # switching to a user's manual Claude session
             post_prompt_deadline = time.time() + 1.0
             pre_prompt_line_count = get_jsonl_line_count(self.workdir, self.session_id)
             refreshed = None
             while time.time() < post_prompt_deadline:
-                refreshed = find_latest_session(self.workdir)
-                if refreshed and refreshed != self.session_id:
-                    break
+                if projects_dir.is_dir():
+                    current_files = {f.name for f in projects_dir.glob("*.jsonl")}
+                    new_files = current_files - existing_files
+                    if new_files:
+                        newest = max(new_files, key=lambda f: (projects_dir / f).stat().st_mtime)
+                        refreshed = newest.replace(".jsonl", "")
+                        break
                 # Also break if new entries appeared (Claude is processing)
                 if get_jsonl_line_count(self.workdir, self.session_id) > pre_prompt_line_count:
                     refreshed = self.session_id

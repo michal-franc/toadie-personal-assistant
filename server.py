@@ -23,7 +23,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from aiohttp import web
@@ -41,6 +41,12 @@ from deepgram import DeepgramClient
 
 PORT = 5566
 client = DeepgramClient()
+
+
+def utc_now_iso() -> str:
+    """Return current UTC time as ISO 8601 string with Z suffix (matches Claude JSONL format)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
 
 # Guard against duplicate Claude launches
 last_claude_launch = 0
@@ -139,7 +145,7 @@ def set_claude_state(status: str, request_id: str = None):
     """Update Claude state and broadcast to clients"""
     claude_state["status"] = status
     claude_state["current_request_id"] = request_id
-    claude_state["last_update"] = datetime.now().isoformat()
+    claude_state["last_update"] = utc_now_iso()
 
     broadcast_message({"type": "state", "status": status, "request_id": request_id})
     logger.info(f"[STATE] Claude state: {status}")
@@ -147,7 +153,7 @@ def set_claude_state(status: str, request_id: str = None):
 
 def add_chat_message(role: str, content: str):
     """Add a message to chat history and broadcast"""
-    message = {"role": role, "content": content, "timestamp": datetime.now().isoformat()}
+    message = {"role": role, "content": content, "timestamp": utc_now_iso()}
     chat_history.append(message)
 
     # Trim to max size
@@ -311,23 +317,29 @@ def init_claude_wrapper():
     model = transcription_config.get("claude_model")
     wrapper = ClaudeWrapper.get_instance(claude_workdir, model=model)
 
+    def _store_claude_timestamp(req_id, claude_timestamp):
+        """Store the first and last claude timestamp on the history entry."""
+        if not req_id or not claude_timestamp:
+            return
+        for entry in request_history:
+            if entry.get("request_id") == req_id:
+                if "first_claude_timestamp" not in entry:
+                    entry["first_claude_timestamp"] = claude_timestamp
+                entry["last_claude_timestamp"] = claude_timestamp
+                break
+
     def on_text(text_chunk, claude_timestamp=None):
         req_id = claude_state.get("current_request_id")
         msg = {"type": "text_chunk", "request_id": req_id, "text": text_chunk}
         if claude_timestamp:
             msg["claude_timestamp"] = claude_timestamp
-            # Store first claude timestamp on history entry for response latency tracking
-            if req_id:
-                for entry in request_history:
-                    if entry.get("request_id") == req_id:
-                        if "first_claude_timestamp" not in entry:
-                            entry["first_claude_timestamp"] = claude_timestamp
-                        break
+        _store_claude_timestamp(req_id, claude_timestamp)
         broadcast_message(msg)
 
     def on_tool(name, input_data, claude_timestamp=None):
         req_id = claude_state.get("current_request_id")
         broadcast_message({"type": "tool", "request_id": req_id, "tool": name})
+        _store_claude_timestamp(req_id, claude_timestamp)
 
         # Add tool step to timeline for tracing
         if req_id:
@@ -336,7 +348,7 @@ def init_claude_wrapper():
                 "name": "tool",
                 "label": f"Tool: {name}",
                 "status": "completed",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": utc_now_iso(),
                 "details": summary,
                 "tool_name": name,
             }
@@ -352,11 +364,10 @@ def init_claude_wrapper():
         # Create a timeline entry so terminal requests appear in the dashboard
         request_id = str(uuid.uuid4())[:8]
         terminal_request_id = request_id
-        received_at = datetime.now()
         entry = {
             "id": len(request_history) + 1,
             "request_id": request_id,
-            "timestamp": received_at.isoformat(),
+            "timestamp": utc_now_iso(),
             "input_type": "terminal",
             "content_type": "text/plain",
             "size_bytes": len(text.encode()),
@@ -369,14 +380,14 @@ def init_claude_wrapper():
                     "name": "received",
                     "label": "Terminal",
                     "status": "completed",
-                    "timestamp": received_at.isoformat(),
+                    "timestamp": utc_now_iso(),
                     "details": f"Terminal input: {len(text)} chars",
                 },
                 {
                     "name": "claude",
                     "label": "Claude",
                     "status": "in_progress",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": utc_now_iso(),
                     "details": "Processing...",
                 },
             ],
@@ -412,6 +423,24 @@ def init_claude_wrapper():
             # Finalize the terminal timeline entry
             req_id = terminal_request_id
             if req_id:
+                # Add Response Ready step with Claude's JSONL timestamp
+                claude_ts = None
+                for entry in request_history:
+                    if entry.get("request_id") == req_id:
+                        claude_ts = entry.get("last_claude_timestamp")
+                        break
+                if claude_ts:
+                    add_response_step(
+                        req_id,
+                        {
+                            "name": "response_ready_claude",
+                            "label": "Response Ready",
+                            "status": "completed",
+                            "timestamp": claude_ts,
+                            "details": f"Claude produced response ({len(result)} chars)" if result else "No response",
+                        },
+                    )
+
                 update_response_step(
                     req_id,
                     "claude",
@@ -427,7 +456,7 @@ def init_claude_wrapper():
                         "name": "response_broadcast",
                         "label": "Response Sent",
                         "status": "completed",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": utc_now_iso(),
                         "details": (
                             f"Broadcast to {client_count} client{'s' if client_count != 1 else ''} via WebSocket"
                         ),
@@ -474,14 +503,14 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
 
     # Mark response as pending
     if request_id:
-        claude_responses[request_id] = {"status": "pending", "timestamp": datetime.now().isoformat()}
+        claude_responses[request_id] = {"status": "pending", "timestamp": utc_now_iso()}
         add_response_step(
             request_id,
             {
                 "name": "claude_started",
                 "label": "Claude Started",
                 "status": "in_progress",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": utc_now_iso(),
                 "details": "Running Claude with JSON streaming...",
             },
         )
@@ -522,27 +551,27 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
 
             # Handle response based on mode
             if response_mode == "disabled":
-                claude_responses[request_id] = {"status": "disabled", "timestamp": datetime.now().isoformat()}
+                claude_responses[request_id] = {"status": "disabled", "timestamp": utc_now_iso()}
                 set_claude_state("idle")
                 return
 
-            # Look up the first claude_timestamp stored by global on_text callback
-            first_claude_ts = None
+            # Look up claude timestamps stored by global on_text/on_tool callbacks
+            claude_ts = None
             if request_id:
                 for entry in request_history:
                     if entry.get("request_id") == request_id:
-                        first_claude_ts = entry.get("first_claude_timestamp")
+                        claude_ts = entry.get("last_claude_timestamp")
                         break
 
             # Add "Response Ready" step with Claude's JSONL timestamp
-            if first_claude_ts:
+            if claude_ts:
                 add_response_step(
                     request_id,
                     {
                         "name": "response_ready_claude",
                         "label": "Response Ready",
                         "status": "completed",
-                        "timestamp": first_claude_ts,
+                        "timestamp": claude_ts,
                         "details": f"Claude produced response ({len(result)} chars)",
                     },
                 )
@@ -552,11 +581,11 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                 "name": "response_captured",
                 "label": "Response Captured",
                 "status": "completed",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": utc_now_iso(),
                 "details": result[:200] + ("..." if len(result) > 200 else ""),
             }
-            if first_claude_ts:
-                captured_step["claude_timestamp"] = first_claude_ts
+            if claude_ts:
+                captured_step["claude_timestamp"] = claude_ts
             add_response_step(request_id, captured_step)
 
             # Add Claude's response to chat (broadcasts via WebSocket)
@@ -572,7 +601,7 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                             "name": "response_broadcast",
                             "label": "Response Sent",
                             "status": "completed",
-                            "timestamp": datetime.now().isoformat(),
+                            "timestamp": utc_now_iso(),
                             "details": (
                                 f"Broadcast to {client_count} client{'s' if client_count != 1 else ''} via WebSocket"
                             ),
@@ -588,7 +617,7 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                         "name": "tts_generating",
                         "label": "Generating Audio",
                         "status": "in_progress",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": utc_now_iso(),
                         "details": "Sending to Deepgram TTS...",
                     },
                 )
@@ -611,7 +640,7 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                     "name": "response_ready",
                     "label": "Ready for Watch",
                     "status": "completed",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": utc_now_iso(),
                     "details": f"Type: {response_mode}",
                 },
             )
@@ -620,7 +649,7 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                 "status": "completed",
                 "response": result,
                 "audio_path": audio_path,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": utc_now_iso(),
             }
 
             # Update state
@@ -644,7 +673,7 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                 claude_responses[request_id] = {
                     "status": "error",
                     "error": str(e),
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": utc_now_iso(),
                 }
                 add_response_step(
                     request_id,
@@ -652,7 +681,7 @@ def run_claude(text: str, request_id: str = None, response_mode: str = "text"):
                         "name": "error",
                         "label": "Error",
                         "status": "error",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": utc_now_iso(),
                         "details": str(e),
                     },
                 )
@@ -761,7 +790,6 @@ class DictationHandler(BaseHTTPRequestHandler):
             print(f"First 20 bytes (hex): {audio_data[:20].hex()}")
         print("========================")
 
-        received_at = datetime.now()
         request_id = str(uuid.uuid4())[:8]  # Short unique ID
 
         # Update state to listening (audio received, being transcribed)
@@ -769,7 +797,7 @@ class DictationHandler(BaseHTTPRequestHandler):
         entry = {
             "id": len(request_history) + 1,
             "request_id": request_id,
-            "timestamp": received_at.isoformat(),
+            "timestamp": utc_now_iso(),
             "input_type": "voice",
             "content_type": content_type,
             "size_bytes": content_length,
@@ -782,7 +810,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                     "name": "received",
                     "label": "Watch",
                     "status": "completed",
-                    "timestamp": received_at.isoformat(),
+                    "timestamp": utc_now_iso(),
                     "details": f"{content_length} bytes, {content_type}",
                 }
             ],
@@ -796,7 +824,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                     "name": "sending",
                     "label": "Sent to Deepgram",
                     "status": "completed",
-                    "timestamp": sending_at.isoformat(),
+                    "timestamp": utc_now_iso(),
                     "details": "Audio sent to cloud",
                 }
             )
@@ -813,7 +841,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                     "name": "transcribed",
                     "label": "Transcribed",
                     "status": "completed",
-                    "timestamp": transcribed_at.isoformat(),
+                    "timestamp": utc_now_iso(),
                     "duration_ms": duration_ms,
                     "details": transcript if transcript else "No speech detected",
                 }
@@ -826,7 +854,6 @@ class DictationHandler(BaseHTTPRequestHandler):
                 request_history.pop()
 
             # Step 4: Claude
-            claude_at = datetime.now()
             response_mode = self.headers.get("X-Response-Mode", "text")
             if transcript:
                 launched = run_claude(transcript, request_id, response_mode)
@@ -837,7 +864,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                         "name": "claude",
                         "label": "Claude",
                         "status": "completed" if launched else "skipped",
-                        "timestamp": claude_at.isoformat(),
+                        "timestamp": utc_now_iso(),
                         "details": "Launched" if launched else "Skipped (duplicate)",
                     }
                 )
@@ -848,7 +875,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                         "name": "claude",
                         "label": "Claude",
                         "status": "skipped",
-                        "timestamp": claude_at.isoformat(),
+                        "timestamp": utc_now_iso(),
                         "details": "Skipped (no speech)",
                     }
                 )
@@ -868,7 +895,6 @@ class DictationHandler(BaseHTTPRequestHandler):
 
         except Exception as e:
             print(f"Error: {e}")
-            error_at = datetime.now()
             entry["status"] = "error"
             entry["error"] = str(e)
 
@@ -885,7 +911,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                             "name": "error",
                             "label": "Error",
                             "status": "error",
-                            "timestamp": error_at.isoformat(),
+                            "timestamp": utc_now_iso(),
                             "details": str(e),
                         }
                     )
@@ -1051,7 +1077,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                     "name": "watch_received",
                     "label": "Watch Received",
                     "status": "completed",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": utc_now_iso(),
                     "details": "Confirmed by watch",
                 },
             )
@@ -1071,14 +1097,13 @@ class DictationHandler(BaseHTTPRequestHandler):
                 return
 
             request_id = str(uuid.uuid4())[:8]
-            received_at = datetime.now()
             print(f"[TEXT] Received message: {text[:50]}...")
 
             # Add to history
             entry = {
                 "id": len(request_history) + 1,
                 "request_id": request_id,
-                "timestamp": received_at.isoformat(),
+                "timestamp": utc_now_iso(),
                 "input_type": "text",
                 "content_type": "text/plain",
                 "size_bytes": len(text.encode()),
@@ -1091,7 +1116,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                         "name": "received",
                         "label": "Phone",
                         "status": "completed",
-                        "timestamp": received_at.isoformat(),
+                        "timestamp": utc_now_iso(),
                         "details": f"Text message: {len(text)} chars",
                     }
                 ],
@@ -1115,7 +1140,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                         "name": "claude",
                         "label": "Claude",
                         "status": "completed",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": utc_now_iso(),
                         "details": "Command sent to Claude",
                     }
                 )
@@ -1172,7 +1197,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                 "status": "pending",
                 "decision": None,
                 "reason": None,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": utc_now_iso(),
                 "claude_request_id": claude_request_id,
             }
 
@@ -1197,7 +1222,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                     {"num": 1, "label": "Allow", "description": "Permit this operation"},
                     {"num": 2, "label": "Deny", "description": "Block this operation"},
                 ],
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": utc_now_iso(),
                 "title": tool_name,
                 "context": context,
                 "request_id": request_id,
@@ -1233,7 +1258,7 @@ class DictationHandler(BaseHTTPRequestHandler):
                         "name": "permission",
                         "label": f"Permission: {tool_name}",
                         "status": "in_progress",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": utc_now_iso(),
                         "details": question,
                         "permission_request_id": request_id,
                     },
@@ -1275,7 +1300,7 @@ class DictationHandler(BaseHTTPRequestHandler):
             perm["status"] = "resolved"
             perm["decision"] = decision
             perm["reason"] = reason
-            perm["resolved_at"] = datetime.now().isoformat()
+            perm["resolved_at"] = utc_now_iso()
 
             logger.info(f"[PERMISSION] Response {request_id}: {decision}")
 
@@ -1418,7 +1443,7 @@ async def websocket_handler(request):
     websocket_clients[ws] = {
         "device_type": device_type,
         "device_id": device_id,
-        "connected_at": datetime.now().isoformat(),
+        "connected_at": utc_now_iso(),
         "ip": client_ip,
     }
     logger.info(f"[WS] Client connected: {device_type} ({device_id or client_ip}). Total: {len(websocket_clients)}")
